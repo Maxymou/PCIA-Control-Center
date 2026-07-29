@@ -443,14 +443,24 @@ export class CalibrationController {
   testSoftwareControl(fanId: FanId): { ok: boolean; error?: string } {
     return this.runStep(fanId, 'test-software-control', async (session, ctx) => {
       const hwmon = this.deps.engine.hwmonBackend();
-      const record = this.deps.repos.calibration.get(fanId);
       const output = hwmon.getOutput(session.outputKey)!;
 
       await this.ensureManualMode(session);
+      // Relu APRÈS le passage en mode manuel : cette étape enregistre les modes
+      // observés, qu'il ne faut pas écraser avec une version périmée.
+      const record = this.deps.repos.calibration.get(fanId);
 
-      // Observation de toutes les autres sorties : aucune ne doit bouger.
+      // Observation des autres sorties. Attention : un ventilateur resté sous
+      // contrôle BIOS change légitimement de vitesse pendant le test (les
+      // températures évoluent). Une variation de RPM n'est donc PAS une preuve
+      // de diaphonie. Le signal fiable est la recopie de notre consigne sur le
+      // registre PWM d'une autre sortie.
       const otherOutputs = hwmon.cached().pwmOutputs.filter((o) => o.key !== session.outputKey);
-      const otherBefore = otherOutputs.map((o) => ({ key: o.key, rpm: safe(() => hwmon.readRpm(o.key)) }));
+      const otherBefore = otherOutputs.map((o) => ({
+        key: o.key,
+        rpm: safe(() => hwmon.readRpm(o.key)),
+        pwm: safe(() => hwmon.readPwmPercent(o.key)),
+      }));
 
       const checks: Record<string, boolean | string> = {};
       // 1. L'écriture est-elle acceptée ?
@@ -485,15 +495,31 @@ export class CalibrationController {
         ? 'non applicable'
         : stability.length > 0 && stability.every((r) => Math.abs(r - avg) < Math.max(150, avg * 0.15));
 
-      // 4. Aucune autre sortie n'a réagi.
-      const otherAfter = otherOutputs.map((o) => ({ key: o.key, rpm: safe(() => hwmon.readRpm(o.key)) }));
-      const moved = otherBefore.filter((b, i) => {
+      // 4. Diaphonie : une autre sortie a-t-elle adopté notre consigne ?
+      const otherAfter = otherOutputs.map((o) => ({
+        key: o.key,
+        rpm: safe(() => hwmon.readRpm(o.key)),
+        pwm: safe(() => hwmon.readPwmPercent(o.key)),
+      }));
+      const contaminated = otherBefore.filter((b, i) => {
+        const a = otherAfter[i];
+        if (a.pwm === null || b.pwm === null) return false;
+        // La sortie voisine n'était pas à 95 % et l'est devenue : notre écriture
+        // a débordé sur son registre.
+        return Math.abs(b.pwm - 95) > 5 && Math.abs(a.pwm - 95) <= 3;
+      });
+      checks.noCrossTalk = contaminated.length === 0;
+      if (contaminated.length) checks.crossTalkOutputs = contaminated.map((m) => m.key).join(', ');
+
+      // Variation de RPM ailleurs : information, jamais un motif d'échec.
+      const otherRpmMoved = otherBefore.filter((b, i) => {
         const a = otherAfter[i];
         if (b.rpm === null || a.rpm === null || b.rpm === 0) return false;
         return Math.abs(a.rpm - b.rpm) / b.rpm > 0.3;
       });
-      checks.noCrossTalk = moved.length === 0;
-      if (moved.length) checks.crossTalkOutputs = moved.map((m) => m.key).join(', ');
+      if (otherRpmMoved.length) {
+        checks.otherFansVaried = otherRpmMoved.map((m) => m.key).join(', ');
+      }
 
       // 5. Pas de surchauffe pendant le test.
       const runtime = this.deps.engine.runtimeFor(fanId);
@@ -533,9 +559,9 @@ export class CalibrationController {
     return this.runStep(fanId, 'test-bios-return', async (session, ctx) => {
       const hwmon = this.deps.engine.hwmonBackend();
       const config = this.deps.engine.appConfig().calibration;
-      const record = this.deps.repos.calibration.get(fanId);
       const output = hwmon.getOutput(session.outputKey)!;
       const sysInfo = readSystemInfo();
+      let record = this.deps.repos.calibration.get(fanId);
 
       if (!output.enablePath) {
         // Sans pwm_enable, il n'existe aucun moyen de rendre la main au BIOS.
@@ -555,6 +581,8 @@ export class CalibrationController {
 
       // 1. Mémoriser un état logiciel volontairement distinctif.
       await this.ensureManualMode(session);
+      // Relu après le passage en mode manuel, qui enregistre les modes observés.
+      record = this.deps.repos.calibration.get(fanId);
       const softwarePwm = 35;
       hwmon.writePwmPercent(session.outputKey, softwarePwm);
       await ctx.wait(5000, 0.05, 0.25);

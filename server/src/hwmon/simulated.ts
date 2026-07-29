@@ -379,6 +379,17 @@ export class SimulatedHwmonBackend implements HwmonBackend {
     if (f) f.writeRefused = refused;
   }
 
+  /** Rend une sortie non inscriptible (permissions insuffisantes, pilote
+   *  en lecture seule). Distinct de `setWriteRefused` : ici, l'écriture n'est
+   *  même pas tentée. */
+  setWritable(label: string, writable: boolean): void {
+    const f = this.fanByLabel(label);
+    if (f) {
+      f.writable = writable;
+      this.discover();
+    }
+  }
+
   /** Retire le retour tachymétrique d'une sortie. */
   setTachAvailable(label: string, available: boolean): void {
     const f = this.fanByLabel(label);

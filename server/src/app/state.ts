@@ -383,6 +383,22 @@ export class AppState {
     return this.rebuild();
   }
 
+  /** Relit toutes les sources avant de recalculer.
+   *
+   *  Plus coûteux que `refresh()` : réservé aux actions qui changent l'état du
+   *  système observé (scénario de démonstration, rafraîchissement explicite),
+   *  où attendre le prochain cycle de collecte donnerait une vue périmée. */
+  async refreshSources(): Promise<ServerSnapshot> {
+    this.opts.env.demo?.step();
+    this.inventory.sampleFast();
+    await Promise.all([
+      this.runDiscovery(),
+      this.inventory.sampleGpus(),
+      this.inventory.sampleStorage(),
+    ]);
+    return this.rebuild();
+  }
+
   hardwareInventory(): HardwareInventory {
     return this.inventory;
   }

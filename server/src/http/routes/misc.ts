@@ -324,7 +324,10 @@ export async function registerMiscRoutes(app: FastifyInstance, ctx: ApiContext):
       ctx.repos.db.prepare('DELETE FROM connection_conflicts').run();
       ctx.repos.db.prepare('DELETE FROM connection_overrides').run();
     }
-    ctx.publish();
+    // Un scénario change l'état observé : on relit les sources plutôt que
+    // d'attendre le prochain cycle de collecte.
+    await ctx.state.refreshSources();
+    ctx.emit('snapshot', ctx.state.snapshot());
     return result;
   });
 }

@@ -76,12 +76,19 @@ export async function registerFanRoutes(app: FastifyInstance, ctx: ApiContext): 
   // Lecture
   // =====================================================================
 
+  /** État courant des sorties, lu directement auprès du moteur.
+   *
+   *  On ne passe pas par le snapshot mis en cache : une consultation ciblée
+   *  doit refléter la dernière boucle de régulation, pas le dernier cycle de
+   *  collecte de l'API. */
+  const liveOutputs = () => ctx.fans.lastState()?.outputs ?? ctx.state.snapshot().fanOutputs ?? [];
+
   app.get('/api/fans', async () => {
-    const snapshot = ctx.state.snapshot();
+    const outputs = liveOutputs();
     return {
       configs: ctx.repos.fanConfigs.list(),
-      live: snapshot.fans,
-      outputs: snapshot.fanOutputs,
+      live: ctx.state.snapshot().fans,
+      outputs,
       calibration: ctx.repos.calibration.list(),
       engineOnline: ctx.fans.online(),
       activeProfileId: ctx.repos.settings.get<string>('activeProfileId', 'p-balanced'),
@@ -92,11 +99,10 @@ export async function registerFanRoutes(app: FastifyInstance, ctx: ApiContext): 
     const parsed = fanIdSchema.safeParse((request.params as { id: string }).id);
     if (!parsed.success) return errorResponse(reply, 404, 'NOT_FOUND', 'Sortie inconnue.');
     const id = parsed.data;
-    const snapshot = ctx.state.snapshot();
     return {
       config: ctx.repos.fanConfigs.get(id),
-      live: snapshot.fans.find((f) => f.id === id) ?? null,
-      output: snapshot.fanOutputs.find((o) => o.id === id) ?? null,
+      live: ctx.state.snapshot().fans.find((f) => f.id === id) ?? null,
+      output: liveOutputs().find((o) => o.id === id) ?? null,
       calibration: ctx.repos.calibration.get(id),
     };
   });

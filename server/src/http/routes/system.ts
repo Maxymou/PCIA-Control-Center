@@ -93,7 +93,8 @@ export async function registerSystemRoutes(app: FastifyInstance, ctx: ApiContext
     } catch {
       // Le moteur peut être hors ligne : ce n'est pas bloquant pour la supervision.
     }
-    ctx.publish('hardware.updated');
+    await ctx.state.refreshSources();
+    ctx.emit('hardware.updated', { time: Date.now() });
     return { ok: true, discovery: ctx.env.hwmon.cached() };
   });
 
