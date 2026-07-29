@@ -1,52 +1,116 @@
-/** COUCHE DE SERVICE — contrat entre l'interface et la source de données.
+/** COUCHE DE SERVICE — point de branchement unique entre l'interface et les données.
  *
- *  Aujourd'hui : implémentation branchée sur le moteur de simulation (mocks).
- *  Demain : réimplémenter ce même contrat avec fetch() / WebSocket vers le
- *  vrai back-end, sans modifier les composants React.
+ *  L'objet `dataService` exporté ici est un **proxy** : il délègue à la source
+ *  effectivement retenue au démarrage.
+ *
+ *    ApiDataProvider   → back-end PCIA détecté sur la même origine ;
+ *    MockDataProvider  → aucun back-end joignable (démonstration hors ligne).
+ *
+ *  Les composants importent toujours `dataService` : la bascule est invisible
+ *  pour eux. Le choix est journalisé et exposé par `providerInfo()`.
  */
 
 import type { FanConfig, FanId, Snapshot } from '../types';
-import { engine } from '../mocks/engine';
+import { ApiDataProvider } from './apiProvider';
+import { mockProvider } from './mockProvider';
+import { api } from './apiClient';
+import type { DataService, DemoActions, InitialConfig, LogEventInput, ProviderKind } from './types';
 
-export interface DataService {
-  start(): void;
-  subscribe(listener: (s: Snapshot) => void): () => void;
-  getSnapshot(): Snapshot;
+export type { DataService, DemoActions, InitialConfig } from './types';
 
-  // Ventilation
-  pushFanConfigs(configs: FanConfig[]): void;
-  startFanTest(id: FanId, seconds: number): void;
-  stopFanTest(id: FanId): void;
-
-  // Alertes
-  ackAlert(id: string): void;
-  snoozeAlert(id: string, minutes: number): void;
-  unsnoozeAlert(id: string): void;
-
-  // Conflits de détection
-  resolveConflict(connectionId: string, acceptDetection: boolean): void;
-
-  // Journalisation côté interface (édition de courbe, changement de profil…)
-  logEvent(e: { category: import('../types').EventCategory; level: import('../types').Severity; targetLabel: string; message: string }): void;
-  addProfileMarker(label: string): void;
-
-  // Panneau de démonstration
-  demo: typeof engine.demo;
+interface HealthResponse {
+  status: string;
+  version: string;
+  mode: 'hardware' | 'demo';
+  fanEngineOnline: boolean;
 }
 
-/** Implémentation simulée. */
+export interface ProviderInfo {
+  kind: ProviderKind;
+  /** Mode annoncé par le back-end ; `mock` en simulation locale. */
+  mode: 'hardware' | 'demo' | 'mock';
+  version: string | null;
+  /** Raison du repli sur la simulation, le cas échéant. */
+  fallbackReason: string | null;
+}
+
+let active: DataService = mockProvider;
+let info: ProviderInfo = { kind: 'mock', mode: 'mock', version: null, fallbackReason: 'Initialisation' };
+let initialised = false;
+
+export function providerInfo(): ProviderInfo {
+  return info;
+}
+
+/** Détecte le back-end et choisit la source de données. À appeler une fois au boot. */
+export async function initDataService(): Promise<ProviderInfo> {
+  if (initialised) return info;
+  initialised = true;
+
+  const forced = (import.meta as { env?: Record<string, string | undefined> }).env?.VITE_PCIA_PROVIDER;
+  if (forced === 'mock') {
+    info = { kind: 'mock', mode: 'mock', version: null, fallbackReason: 'Forcé par VITE_PCIA_PROVIDER=mock' };
+    return info;
+  }
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    const health = await api.get<HealthResponse>('/api/health', controller.signal);
+    clearTimeout(timeout);
+    if (health?.status === 'ok') {
+      active = new ApiDataProvider();
+      info = { kind: 'api', mode: health.mode, version: health.version, fallbackReason: null };
+      return info;
+    }
+    info = {
+      kind: 'mock', mode: 'mock', version: null,
+      fallbackReason: 'Le back-end a répondu de façon inattendue.',
+    };
+  } catch (err) {
+    // Aucun back-end : l'application reste pleinement utilisable en simulation.
+    info = {
+      kind: 'mock', mode: 'mock', version: null,
+      fallbackReason: `Back-end injoignable (${(err as Error).message}).`,
+    };
+  }
+  return info;
+}
+
+/** Proxy stable : les composants gardent la même référence après la bascule. */
 export const dataService: DataService = {
-  start: () => engine.start(),
-  subscribe: (l) => engine.subscribe(l),
-  getSnapshot: () => engine.getSnapshot(),
-  pushFanConfigs: (c) => engine.setFanConfigs(c),
-  startFanTest: (id, s) => engine.startFanTest(id, s),
-  stopFanTest: (id) => engine.stopFanTest(id),
-  ackAlert: (id) => engine.ackAlert(id),
-  snoozeAlert: (id, m) => engine.snoozeAlert(id, m),
-  unsnoozeAlert: (id) => engine.unsnoozeAlert(id),
-  resolveConflict: (id, a) => engine.resolveConflict(id, a),
-  logEvent: (e) => engine.logEvent(e),
-  addProfileMarker: (l) => engine.addProfileMarker(l),
-  demo: engine.demo,
+  get kind(): ProviderKind {
+    return active.kind;
+  },
+  start: () => active.start(),
+  subscribe: (listener: (s: Snapshot) => void) => active.subscribe(listener),
+  getSnapshot: () => active.getSnapshot(),
+
+  pushFanConfigs: (configs: FanConfig[]) => active.pushFanConfigs(configs),
+  startFanTest: (id: FanId, seconds: number) => active.startFanTest(id, seconds),
+  stopFanTest: (id: FanId) => active.stopFanTest(id),
+
+  ackAlert: (id: string) => active.ackAlert(id),
+  snoozeAlert: (id: string, minutes: number) => active.snoozeAlert(id, minutes),
+  unsnoozeAlert: (id: string) => active.unsnoozeAlert(id),
+
+  resolveConflict: (id: string, accept: boolean) => active.resolveConflict(id, accept),
+
+  logEvent: (e: LogEventInput) => active.logEvent(e),
+  addProfileMarker: (label: string) => active.addProfileMarker(label),
+
+  // Les déclencheurs de démonstration sont résolus à l'appel, pas à l'import.
+  demo: new Proxy({} as DemoActions, {
+    get: (_target, prop: string) => () => {
+      const action = (active.demo as unknown as Record<string, (() => void) | undefined>)[prop];
+      action?.();
+    },
+  }),
+
+  loadInitialConfig: (): Promise<InitialConfig | null> =>
+    active.loadInitialConfig ? active.loadInitialConfig() : Promise.resolve(null),
+  loadUiState: () => (active.loadUiState ? active.loadUiState() : Promise.resolve(null)),
+  saveUiState: (state: Record<string, unknown>) =>
+    active.saveUiState ? active.saveUiState(state) : Promise.resolve(),
+  lastError: () => (active.lastError ? active.lastError() : null),
 };

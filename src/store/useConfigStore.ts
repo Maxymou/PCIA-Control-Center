@@ -4,12 +4,13 @@
  *  réglages de ventilation, profils personnalisés, préférences. */
 
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
 import type {
   Connection, FanConfig, FanCurve, FanId, FanProfile, Service, ServiceGroup,
 } from '../types';
 import { seedFanConfigs, seedGroups, seedProfiles } from '../mocks/seed';
 import { dataService } from '../services/dataService';
+import { createHybridStorage, onSaveStateChange } from './configStorage';
 import { uid } from '../utils/format';
 
 export type SaveState = 'saved' | 'saving' | 'error';
@@ -35,6 +36,8 @@ interface ConfigState extends UndoableSlice {
   savedLayout: GraphLayout | null;      // disposition restaurable explicitement
   filters: { statuses: string[]; types: string[]; search: string };
   fanConfigs: FanConfig[];
+  /** Profils prédéfinis : fournis par le back-end réel, sinon par les mocks. */
+  builtinProfiles: FanProfile[];
   customProfiles: FanProfile[];
   activeProfileId: string;
   prefs: {
@@ -90,6 +93,15 @@ interface ConfigState extends UndoableSlice {
   undo(): void;
   redo(): void;
   resetAll(): void;
+
+  /** Applique la configuration reçue du back-end au démarrage. */
+  hydrateServerConfig(payload: {
+    fanConfigs: FanConfig[];
+    builtinProfiles: FanProfile[];
+    customProfiles: FanProfile[];
+    activeProfileId: string;
+  }): void;
+  setSaveState(state: SaveState): void;
 }
 
 const emptyLayout: GraphLayout = { positions: {} };
@@ -148,6 +160,7 @@ export const useConfigStore = create<ConfigState>()(
         connectionOverrides: {},
         filters: { statuses: [], types: [], search: '' },
         fanConfigs: structuredClone(seedFanConfigs),
+        builtinProfiles: structuredClone(seedProfiles),
         customProfiles: [{ id: 'p-custom', name: 'Personnalisé', builtin: false, curves: structuredClone(seedProfiles[1].curves) }],
         activeProfileId: 'p-balanced',
         prefs: { pulseAnimations: true, fanChartMode: 'rpm' },
@@ -230,7 +243,7 @@ export const useConfigStore = create<ConfigState>()(
           // Modifier une courbe d'un profil prédéfini bascule sur « Personnalisé »
           let activeProfileId = st.activeProfileId;
           let customProfiles = st.customProfiles;
-          const active = [...seedProfiles, ...st.customProfiles].find((p) => p.id === activeProfileId);
+          const active = [...st.builtinProfiles, ...st.customProfiles].find((p) => p.id === activeProfileId);
           if (active?.builtin) {
             activeProfileId = 'p-custom';
           }
@@ -243,7 +256,7 @@ export const useConfigStore = create<ConfigState>()(
           syncFans(fans);
         },
         applyProfile: (profileId, fanId) => {
-          const all = [...seedProfiles, ...get().customProfiles];
+          const all = [...get().builtinProfiles, ...get().customProfiles];
           const p = all.find((x) => x.id === profileId);
           if (!p) return;
           const fans = get().fanConfigs.map((f) =>
@@ -253,7 +266,7 @@ export const useConfigStore = create<ConfigState>()(
           syncFans(fans);
         },
         duplicateProfile: (profileId) => {
-          const all = [...seedProfiles, ...get().customProfiles];
+          const all = [...get().builtinProfiles, ...get().customProfiles];
           const p = all.find((x) => x.id === profileId);
           if (!p) return;
           mutate({
@@ -278,7 +291,7 @@ export const useConfigStore = create<ConfigState>()(
         restoreBuiltinProfiles: () => {
           // Les profils prédéfinis ne sont jamais modifiés : on réapplique simplement le profil actif s'il est prédéfini.
           const st = get();
-          const p = seedProfiles.find((x) => x.id === st.activeProfileId);
+          const p = st.builtinProfiles.find((x) => x.id === st.activeProfileId);
           if (p) {
             const fans = st.fanConfigs.map((f) => ({ ...f, curve: structuredClone(p.curves[f.id]) }));
             mutate({ fanConfigs: fans }, false);
@@ -315,12 +328,30 @@ export const useConfigStore = create<ConfigState>()(
 
         resetAll: () => {
           localStorage.removeItem('pcia-config');
+          void useConfigStore.persist.clearStorage();
           window.location.reload();
         },
+
+        hydrateServerConfig: (payload) => {
+          // La configuration du back-end fait autorité sur la ventilation :
+          // c'est lui qui l'a validée et qui l'applique réellement.
+          set({
+            fanConfigs: payload.fanConfigs.length ? payload.fanConfigs : get().fanConfigs,
+            builtinProfiles: payload.builtinProfiles.length ? payload.builtinProfiles : get().builtinProfiles,
+            customProfiles: payload.customProfiles.length ? payload.customProfiles : get().customProfiles,
+            activeProfileId: payload.activeProfileId || get().activeProfileId,
+          });
+        },
+
+        setSaveState: (state) => set({ saveState: state }),
       };
     },
     {
       name: 'pcia-config',
+      // L'hydratation est déclenchée manuellement par `bootConfig()`, une fois
+      // la source de données choisie (serveur ou localStorage).
+      skipHydration: true,
+      storage: createJSONStorage(createHybridStorage),
       partialize: (s) => ({
         layout: s.layout, savedLayout: s.savedLayout,
         hiddenServices: s.hiddenServices, hiddenConnections: s.hiddenConnections,
@@ -336,7 +367,23 @@ export const useConfigStore = create<ConfigState>()(
   ),
 );
 
-/** Pousse la config ventilateurs initiale vers la simulation au boot. */
-export function bootConfig() {
+/** Amorçage : hydratation locale, puis alignement sur le back-end s'il existe.
+ *
+ *  Ordre volontaire — l'état persisté est restauré d'abord (affichage immédiat),
+ *  puis la configuration de ventilation du serveur écrase la copie locale : le
+ *  back-end est seul à connaître ce qui est réellement appliqué au matériel. */
+export async function bootConfig(): Promise<void> {
+  onSaveStateChange((state) => useConfigStore.getState().setSaveState(state));
+  try {
+    await useConfigStore.persist.rehydrate();
+  } catch {
+    // Préférences illisibles : on repart des valeurs par défaut plutôt que
+    // d'empêcher le démarrage de l'interface.
+  }
+
+  const serverConfig = await dataService.loadInitialConfig?.();
+  if (serverConfig) {
+    useConfigStore.getState().hydrateServerConfig(serverConfig);
+  }
   dataService.pushFanConfigs(useConfigStore.getState().fanConfigs);
 }

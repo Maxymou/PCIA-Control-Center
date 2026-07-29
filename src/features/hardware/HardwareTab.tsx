@@ -1,7 +1,6 @@
 import { useLiveStore } from '../../store/useLiveStore';
 import { useConfigStore } from '../../store/useConfigStore';
 import { useActiveAlerts, useGlobalStatus } from '../../store/selectors';
-import { seedProfiles } from '../../mocks/seed';
 import { SEVERITY_LABELS } from '../../utils/labels';
 import { StatusDot } from '../../components/Common';
 import { HardwareSchema } from './HardwareSchema';
@@ -20,7 +19,7 @@ function SummaryCards() {
   const gpus = hardware.filter((h) => h.kind === 'gpu' && h.installed);
   const hottest = gpus.reduce((a, b) => ((b.metrics.temp ?? 0) > (a?.metrics.temp ?? -1) ? b : a), gpus[0]);
   const nvme = hardware.find((h) => h.id === 'nvme');
-  const profile = [...seedProfiles, ...cfg.customProfiles].find((p) => p.id === cfg.activeProfileId);
+  const profile = [...cfg.builtinProfiles, ...cfg.customProfiles].find((p) => p.id === cfg.activeProfileId);
   const pulse = useConfigStore((s) => s.prefs.pulseAnimations);
 
   return (

@@ -204,10 +204,76 @@ export interface HistoryMarker {
   kind: 'alert' | 'event' | 'profile';
 }
 
+// ---------- Informations du back-end ----------
+/** Mode d'exécution réel du back-end. `mock` = simulation locale au navigateur. */
+export type BackendMode = 'hardware' | 'demo';
+
+/** Ce que le système sait réellement faire : l'interface désactive le reste. */
+export interface BackendCapabilities {
+  canReadTemperature: boolean;
+  canReadRpm: boolean;
+  canWritePwm: boolean;
+  canReturnToBios: boolean;
+  canDetectServices: boolean;
+  canDetectConnections: boolean;
+  canReadGpuPower: boolean;
+  canReadStorageSmart: boolean;
+  canControlFans: boolean;
+  tools: Record<string, boolean>;
+}
+
+export interface BackendSystemStatus {
+  version: string;
+  mode: BackendMode;
+  /** Mode matériel avec des sources manquantes (supervision partielle). */
+  degraded: boolean;
+  degradedReasons: string[];
+  startedAt: number;
+  kernel: string;
+  distribution: string;
+  hostname: string;
+  fanEngine: {
+    online: boolean;
+    lastHeartbeat: number | null;
+    embedded: boolean;
+    failsafe: boolean;
+  };
+  capabilities: BackendCapabilities;
+}
+
+/** Qui pilote effectivement une sortie de ventilation. */
+export type FanControlState =
+  | 'BIOS_CONTROLLED' | 'SOFTWARE_STARTING' | 'SOFTWARE_CONTROLLED'
+  | 'FAILSAFE' | 'RETURNING_TO_BIOS' | 'UNSUPPORTED' | 'ERROR';
+
+export type CalibrationState =
+  | 'NOT_CALIBRATED' | 'DETECTED' | 'IDENTIFIED' | 'RPM_CONFIRMED'
+  | 'SOFTWARE_CONTROL_VALIDATED' | 'BIOS_RETURN_VALIDATED' | 'AUTHORIZED'
+  | 'RESTRICTED' | 'FAILED';
+
+export interface FanOutputState {
+  id: FanId;
+  controlState: FanControlState;
+  calibrationState: CalibrationState;
+  pwm: number;
+  requestedPwm: number;
+  rpm: number | null;
+  refTemp: number | null;
+  sensorLostSince: number | null;
+  stalled: boolean;
+  stalledSince: number | null;
+  testRemainingS: number | null;
+  lastWriteError: string | null;
+  writeFailures: number;
+  boundOutputKey: string | null;
+  severity: Severity;
+}
+
 // ---------- Snapshot global ----------
 export interface Snapshot {
   time: number;
-  backendConnected: boolean;   // simulé
+  /** Faux quand le front-end a perdu le contact avec le back-end. */
+  backendConnected: boolean;
   services: Service[];
   connections: Connection[];
   conflicts: ConnectionConflict[];
@@ -217,4 +283,9 @@ export interface Snapshot {
   events: AppEvent[];
   history: HistoryPoint[];
   markers: HistoryMarker[];
+
+  /** Renseigné par le vrai back-end ; absent en simulation locale. */
+  system?: BackendSystemStatus;
+  /** État BIOS/logiciel des sorties — absent en simulation locale. */
+  fanOutputs?: FanOutputState[];
 }

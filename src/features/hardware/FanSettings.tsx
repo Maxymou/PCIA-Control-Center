@@ -3,7 +3,6 @@ import { useConfigStore } from '../../store/useConfigStore';
 import { useLiveStore } from '../../store/useLiveStore';
 import { useUiStore } from '../../store/useUiStore';
 import { dataService } from '../../services/dataService';
-import { seedProfiles } from '../../mocks/seed';
 import type { FanCurve, FanMode, HardwareId, SensorRef } from '../../types';
 import { FAN_MODE_LABELS } from '../../utils/labels';
 import { CurveEditor } from './CurveEditor';
@@ -107,13 +106,13 @@ export function FanSettings() {
     if (sessionStart.current) cfg.setCurve(fan.id, structuredClone(sessionStart.current));
   };
   const restoreProfileCurve = () => {
-    const all = [...seedProfiles, ...cfg.customProfiles];
+    const all = [...cfg.builtinProfiles, ...cfg.customProfiles];
     const p = all.find((x) => x.id === cfg.activeProfileId);
     if (p) cfg.setCurve(fan.id, structuredClone(p.curves[fan.id]));
   };
 
   const sensorValue = fan.sensor.kind === 'single' ? fan.sensor.source : fan.sensor.kind;
-  const allProfiles = [...seedProfiles, ...cfg.customProfiles];
+  const allProfiles = [...cfg.builtinProfiles, ...cfg.customProfiles];
 
   return (
     <div className="card card-pad">
