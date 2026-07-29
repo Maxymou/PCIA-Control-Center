@@ -6,6 +6,7 @@
 
 import { beforeEach, describe, expect, it } from 'vitest';
 import { HwmonError, percentToRaw, rawToPercent } from '../src/hwmon/backend.js';
+import { checkSocketPath } from '../src/fan/ipc.js';
 import { SIM_MODE_BIOS, SIM_MODE_MANUAL, SimulatedHwmonBackend } from '../src/hwmon/simulated.js';
 import { DemoWorld } from '../src/demo/world.js';
 
@@ -199,5 +200,20 @@ describe('capteurs', () => {
     expect(hwmon.readTempC(sensor.key)).not.toBeNull();
     hwmon.setSensorFailed('cpu', true);
     expect(hwmon.readTempC(sensor.key)).toBeNull();
+  });
+});
+
+describe('canal de commande', () => {
+  it('refuse un chemin de socket que le noyau tronquerait', () => {
+    // sun_path est limité à 107 octets : au-delà, le serveur écouterait sur un
+    // fichier différent de celui que le client cherche.
+    const long = `/tmp/${'x'.repeat(120)}/fand.sock`;
+    const result = checkSocketPath(long);
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/trop long/);
+  });
+
+  it('accepte le chemin d’installation standard', () => {
+    expect(checkSocketPath('/run/pcia-control-center/fand.sock').ok).toBe(true);
   });
 });

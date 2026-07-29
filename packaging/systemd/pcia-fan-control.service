@@ -1,0 +1,65 @@
+[Unit]
+Description=PCIA Control Center — moteur de ventilation
+Documentation=https://github.com/Maxymou/PCIA-Control-Center
+# Les pilotes hwmon doivent être chargés avant le démarrage du moteur.
+After=systemd-modules-load.service local-fs.target
+Wants=systemd-modules-load.service
+# Le moteur est autonome : il ne dépend ni du réseau ni de l'API.
+
+[Service]
+Type=simple
+User=pcia
+Group=pcia
+WorkingDirectory=/opt/pcia-control-center
+Environment=NODE_ENV=production
+Environment=PCIA_CONFIG=/etc/pcia-control-center/config.yaml
+EnvironmentFile=-/etc/pcia-control-center/env
+ExecStart=/usr/bin/node /opt/pcia-control-center/dist-server/server/src/fand.js
+
+# Redémarrage automatique : la ventilation est critique.
+Restart=on-failure
+RestartSec=2
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Arrêt ordonné : consigne sûre, restitution au BIOS, vérification.
+# Le délai doit rester supérieur à la durée de cette séquence.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# Écriture des sorties PWM : accès en écriture à /sys/class/hwmon.
+# Fourni par la règle udev 99-pcia-hwmon.rules (groupe pcia), sans root.
+ReadWritePaths=/var/lib/pcia-control-center /run/pcia-control-center /sys/class/hwmon
+RuntimeDirectory=pcia-control-center
+RuntimeDirectoryMode=0750
+StateDirectory=pcia-control-center
+StateDirectoryMode=0750
+
+# Durcissement : le moteur n'a besoin ni du réseau, ni de /home, ni de shell.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=false
+ProtectHome=true
+ProtectSystem=strict
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+SystemCallArchitectures=native
+# Un socket Unix local suffit : aucune socket réseau.
+RestrictAddressFamilies=AF_UNIX
+
+# Surveillance : le moteur publie un heartbeat dans son fichier d'état ; la
+# détection de blocage complet reste du ressort de systemd.
+WatchdogSec=0
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pcia-fand
+
+[Install]
+WantedBy=multi-user.target

@@ -60,6 +60,22 @@ export interface IpcResponse {
 
 export type IpcHandler = (command: IpcCommand, params: Record<string, unknown>) => Promise<unknown> | unknown;
 
+/** Longueur maximale d'un chemin de socket Unix (`sun_path`, NUL compris). */
+export const MAX_SOCKET_PATH_BYTES = 107;
+
+/** Le noyau tronque silencieusement un chemin trop long : le serveur écouterait
+ *  alors sur un fichier que le client ne trouverait jamais. On le détecte. */
+export function checkSocketPath(path: string): { ok: boolean; error?: string } {
+  const length = Buffer.byteLength(path, 'utf8');
+  if (length <= MAX_SOCKET_PATH_BYTES) return { ok: true };
+  return {
+    ok: false,
+    error: `Chemin de socket trop long (${length} octets, maximum ${MAX_SOCKET_PATH_BYTES}) : ${path}. `
+      + 'Le noyau le tronquerait et le moteur deviendrait injoignable. '
+      + 'Choisir un `storage.runtime_dir` plus court (ex. /run/pcia-control-center).',
+  };
+}
+
 // =====================================================================
 // Serveur (côté moteur)
 // =====================================================================
@@ -71,6 +87,13 @@ export class FanIpcServer {
   constructor(private socketPath: string, private handler: IpcHandler) {}
 
   start(): void {
+    const check = checkSocketPath(this.socketPath);
+    if (!check.ok) {
+      // Échec explicite plutôt qu'un canal de commande silencieusement inutile.
+      // La régulation, elle, continue : seul le pilotage à distance est perdu.
+      log.error('Canal de commande non ouvert', { reason: check.error });
+      return;
+    }
     mkdirSync(dirname(this.socketPath), { recursive: true });
     // Un socket résiduel d'un processus mort empêcherait l'écoute.
     if (existsSync(this.socketPath)) {
@@ -104,12 +127,21 @@ export class FanIpcServer {
     });
 
     this.server.listen(this.socketPath, () => {
-      try {
-        // Lecture/écriture pour le propriétaire et son groupe uniquement.
-        chmodSync(this.socketPath, 0o660);
-      } catch (err) {
-        log.warn('Permissions du socket non appliquées', { error: err });
-      }
+      // Lecture/écriture pour le propriétaire et son groupe uniquement.
+      // Sur certains systèmes de fichiers, le nœud n'est pas immédiatement
+      // visible après le bind : une seconde tentative suffit.
+      const applyPermissions = (retry: boolean) => {
+        try {
+          chmodSync(this.socketPath, 0o660);
+        } catch (err) {
+          if (retry && (err as NodeJS.ErrnoException).code === 'ENOENT') {
+            setTimeout(() => applyPermissions(false), 50);
+            return;
+          }
+          log.warn('Permissions du socket non appliquées', { path: this.socketPath, error: err });
+        }
+      };
+      applyPermissions(true);
       log.info('Canal de commande ouvert', { path: this.socketPath });
     });
 
@@ -166,12 +198,17 @@ export class FanIpcClient {
   constructor(private socketPath: string, private timeoutMs = 5000) {}
 
   available(): boolean {
-    return existsSync(this.socketPath);
+    return checkSocketPath(this.socketPath).ok && existsSync(this.socketPath);
   }
 
   /** Envoie une commande. Une connexion par requête : simple et robuste. */
   request<T = unknown>(command: IpcCommand, params: Record<string, unknown> = {}, timeoutMs?: number): Promise<T> {
     return new Promise<T>((resolve, reject) => {
+      const check = checkSocketPath(this.socketPath);
+      if (!check.ok) {
+        reject(new Error(check.error));
+        return;
+      }
       if (!existsSync(this.socketPath)) {
         reject(new Error('Moteur de ventilation injoignable (socket absent).'));
         return;

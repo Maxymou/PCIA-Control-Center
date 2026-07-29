@@ -1,0 +1,121 @@
+# Configuration de PCIA Control Center
+#
+# Emplacement attendu : /etc/pcia-control-center/config.yaml
+# Toutes les clés sont facultatives : les valeurs ci-dessous sont les valeurs
+# par défaut. Les variables d'environnement PCIA_* sont prioritaires.
+#
+# Les clés acceptent le snake_case (ci-dessous) comme le camelCase.
+
+server:
+  # 0.0.0.0 : joignable depuis le réseau local. 127.0.0.1 pour restreindre à la machine.
+  host: 0.0.0.0
+  port: 4321
+  # Origines autorisées en CORS — utile uniquement pour le serveur de dev Vite.
+  cors_origins: []
+  # Répertoire du front-end compilé. Détecté automatiquement s'il est absent.
+  # static_dir: /opt/pcia-control-center/dist
+
+mode:
+  # hardware : mesures réelles uniquement.
+  # demo     : tout est simulé (et annoncé comme tel dans l'interface).
+  # auto     : matériel si /sys/class/hwmon est lisible, sinon démonstration.
+  type: auto
+  demo_gtx_installed: true
+
+storage:
+  database_path: /var/lib/pcia-control-center/pcia.db
+  runtime_dir: /run/pcia-control-center
+
+history:
+  # Rétention des mesures détaillées. L'interface affiche une fenêtre de 60 min.
+  retention_hours: 24
+  sample_interval_ms: 10000
+  purge_interval_ms: 900000
+
+collector:
+  sensors_interval_ms: 2000
+  power_interval_ms: 4000
+  storage_interval_ms: 20000
+  services_interval_ms: 10000
+  connections_interval_ms: 10000
+  inventory_interval_ms: 60000
+
+fan_control:
+  loop_interval_ms: 1000
+
+  # Consigne appliquée quand un capteur de référence devient illisible.
+  sensor_failure_pwm: 80
+  # Consigne appliquée quand la perte de capteur se prolonge, ou en situation critique.
+  critical_pwm: 100
+  sensor_grace_ms: 15000
+
+  # ATTENTION — sécurité.
+  # `true` (recommandé) : une sortie ne passe sous contrôle logiciel au démarrage
+  # que si le retour au BIOS a été confirmé par la calibration. Passer à `false`
+  # signifie accepter qu'après un arrêt du service, les ventilateurs puissent
+  # rester figés sur leur dernière consigne. Voir « Limites connues » du README.
+  require_bios_return_validation: true
+
+  # Détection de ventilateur bloqué : les trois conditions doivent être réunies.
+  stall:
+    pwm_threshold: 30       # consigne minimale pour que 0 RPM soit anormal
+    delay_ms: 10000         # durée minimale de la condition
+    consecutive_reads: 3    # lectures consécutives à 0 RPM
+
+  max_write_failures: 3
+
+  # Plancher imposé aux sorties refroidissant du matériel passif (Tesla V100).
+  # Ces cartes n'ont pas de ventilateur intégré : elles ne doivent jamais se
+  # retrouver sans flux d'air.
+  passive_gpu_floor_pwm: 35
+
+  heartbeat_interval_ms: 2000
+  heartbeat_timeout_ms: 8000
+  # Consigne appliquée juste avant la restitution au BIOS lors d'un arrêt propre.
+  shutdown_pwm: 70
+
+  # Moteur embarqué dans le serveur web :
+  #   auto   : seulement si aucun daemon pcia-fand ne détient le verrou ;
+  #   always : déploiement mono-processus (sans systemd) ;
+  #   never  : le daemon est obligatoire.
+  embedded: auto
+
+calibration:
+  identify_step_seconds: 6
+  identify_low_pwm: 70
+  identify_high_pwm: 100
+  minimum_step_seconds: 6
+  minimum_decrement: 5
+  minimum_safety_margin: 10
+  bios_return_observe_seconds: 12
+  # Toute calibration est interrompue au-delà de cette température.
+  abort_temperature_c: 85
+
+alerts:
+  # Seuils [attention, critique] par composant, en °C.
+  temperature_thresholds:
+    cpu: [75, 88]
+    nvme: [60, 72]
+    v100-1: [80, 88]
+    v100-2: [80, 88]
+    gtx1080: [78, 88]
+    motherboard: [55, 65]
+    case-front: [45, 55]
+    case-rear: [48, 58]
+  # Température de référence déclenchant une consigne 100 % immédiate.
+  critical_temperature_c: 90
+
+security:
+  # Refuse les requêtes provenant d'adresses non privées.
+  # Ne jamais passer à `false` sur une machine exposée à Internet.
+  lan_only: true
+  # none  : réseau local de confiance, aucune authentification.
+  # token : jeton partagé exigé pour les actions sensibles.
+  auth_mode: none
+  # token: "changez-moi"
+  # Permet de désactiver globalement calibration, écriture PWM, import, etc.
+  allow_sensitive_actions: true
+
+logging:
+  level: info      # debug | info | warn | error
+  format: json     # json (journald) | text
