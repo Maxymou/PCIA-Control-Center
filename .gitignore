@@ -1,0 +1,21 @@
+# Dépendances
+node_modules/
+
+# Sorties de build
+dist/
+dist-server/
+dist-mock/
+*.tsbuildinfo
+
+# Données locales de développement (jamais dans le dépôt)
+*.db
+*.db-wal
+*.db-shm
+run/
+.pcia-state/
+
+# Journaux et fichiers temporaires
+*.log
+.DS_Store
+.env
+.env.local

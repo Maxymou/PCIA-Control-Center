@@ -1,0 +1,53 @@
+[Unit]
+Description=PCIA Control Center — interface, API et supervision
+Documentation=https://github.com/Maxymou/PCIA-Control-Center
+After=network-online.target pcia-fan-control.service
+Wants=network-online.target
+# Volontairement `Wants` et non `Requires` : si le moteur de ventilation est
+# arrêté, l'interface doit rester accessible pour le signaler.
+Wants=pcia-fan-control.service
+
+[Service]
+Type=simple
+User=pcia
+Group=pcia
+WorkingDirectory=/opt/pcia-control-center
+Environment=NODE_ENV=production
+Environment=PCIA_CONFIG=/etc/pcia-control-center/config.yaml
+EnvironmentFile=-/etc/pcia-control-center/env
+ExecStart=/usr/bin/node /opt/pcia-control-center/dist-server/server/src/index.js
+
+Restart=on-failure
+RestartSec=3
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+KillSignal=SIGTERM
+TimeoutStopSec=20
+
+ReadWritePaths=/var/lib/pcia-control-center /run/pcia-control-center
+RuntimeDirectory=pcia-control-center
+RuntimeDirectoryMode=0750
+StateDirectory=pcia-control-center
+StateDirectoryMode=0750
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pcia-control-center
+
+[Install]
+WantedBy=multi-user.target

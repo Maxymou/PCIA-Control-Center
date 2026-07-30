@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { useConfigStore } from '../../store/useConfigStore';
-import { seedProfiles } from '../../mocks/seed';
 import { dataService } from '../../services/dataService';
 import type { FanProfile } from '../../types';
 import { Confirm, Modal } from '../../components/Common';
@@ -21,7 +20,7 @@ function ProfilePreview({ p }: { p: FanProfile }) {
 
 export function ProfilesBar() {
   const cfg = useConfigStore();
-  const all = [...seedProfiles, ...cfg.customProfiles];
+  const all = [...cfg.builtinProfiles, ...cfg.customProfiles];
   const [renaming, setRenaming] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [confirmDel, setConfirmDel] = useState<string | null>(null);

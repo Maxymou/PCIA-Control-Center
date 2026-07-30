@@ -1,0 +1,18 @@
+# Accès aux sorties PWM pour PCIA Control Center, sans exécuter le service en root.
+#
+# Donne au groupe `pcia` le droit d'écrire les fichiers de contrôle de
+# ventilation exposés par les pilotes hwmon. Rien d'autre n'est ouvert :
+# ni les capteurs d'autres sous-systèmes, ni les périphériques bruts.
+#
+# À installer dans /etc/udev/rules.d/ puis :
+#   sudo udevadm control --reload-rules && sudo udevadm trigger --subsystem-match=hwmon
+#
+# Les attributs pwm* n'existent que sur les contrôleurs qui savent piloter des
+# ventilateurs (Super-IO de la carte mère). Les autres ne sont pas concernés.
+
+SUBSYSTEM=="hwmon", ACTION=="add", RUN+="/bin/sh -c '\
+  for f in /sys%p/pwm[0-9] /sys%p/pwm[0-9]_enable /sys%p/pwm[0-9]_mode; do \
+    [ -e \"$f\" ] || continue; \
+    chgrp pcia \"$f\" 2>/dev/null || true; \
+    chmod g+w \"$f\" 2>/dev/null || true; \
+  done'"
