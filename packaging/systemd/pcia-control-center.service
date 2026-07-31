@@ -7,6 +7,11 @@ Wants=network-online.target
 # arrêté, l'interface doit rester accessible pour le signaler.
 Wants=pcia-fan-control.service
 
+# Limitation des redémarrages en boucle. Ces deux directives appartiennent à
+# [Unit] : placées dans [Service], systemd les ignore avec un avertissement.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
 [Service]
 Type=simple
 User=pcia
@@ -19,15 +24,18 @@ ExecStart=/usr/bin/node /opt/pcia-control-center/dist-server/server/src/index.js
 
 Restart=on-failure
 RestartSec=3
-StartLimitIntervalSec=60
-StartLimitBurst=5
 
 KillSignal=SIGTERM
 TimeoutStopSec=20
 
 ReadWritePaths=/var/lib/pcia-control-center /run/pcia-control-center
+# /run/pcia-control-center est PARTAGÉ avec pcia-fan-control.service (socket
+# IPC, verrou, fichier d'état). Sans RuntimeDirectoryPreserve, l'arrêt de l'un
+# des deux services supprime le répertoire encore utilisé par l'autre, qui
+# échoue ensuite sur « EACCES: permission denied, mkdir ».
 RuntimeDirectory=pcia-control-center
 RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=yes
 StateDirectory=pcia-control-center
 StateDirectoryMode=0750
 
@@ -43,7 +51,11 @@ RestrictRealtime=true
 RestrictNamespaces=true
 LockPersonality=true
 SystemCallArchitectures=native
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# AF_NETLINK est indispensable : os.networkInterfaces(), utilisé par Fastify au
+# démarrage, interroge le noyau via Netlink (uv_interface_addresses). Sans lui,
+# Node.js échoue avec « ERR_SYSTEM_ERROR: uv_interface_addresses returned
+# Unknown system error 97 ». Le daemon de ventilation n'en a pas besoin.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 
 StandardOutput=journal
 StandardError=journal

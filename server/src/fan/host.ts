@@ -105,11 +105,22 @@ export class FanHost {
     return { started: true, heldBy: process.pid };
   }
 
+  /** Arrêt ordonné, dans cet ordre précis :
+   *
+   *   1. plus aucune commande entrante (canal IPC fermé) ;
+   *   2. les calibrations en cours sont interrompues et l'état PWM initial est
+   *      restauré — **avant** l'arrêt du moteur et avant que l'appelant ferme
+   *      SQLite, sinon un callback différé reprendrait la main sur une base
+   *      close (« The database connection is not open ») ;
+   *   3. le moteur restitue les sorties au BIOS ;
+   *   4. le verrou exclusif est libéré.
+   */
   async stop(): Promise<void> {
     if (this.stateTimer) clearInterval(this.stateTimer);
     this.stateTimer = null;
     this.ipc?.stop();
     this.ipc = null;
+    await this.calibration.shutdown();
     await this.engine.shutdown();
     this.lock?.release();
     this.lock = null;

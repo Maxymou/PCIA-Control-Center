@@ -6,6 +6,11 @@ After=systemd-modules-load.service local-fs.target
 Wants=systemd-modules-load.service
 # Le moteur est autonome : il ne dépend ni du réseau ni de l'API.
 
+# Limitation des redémarrages en boucle. Ces deux directives appartiennent à
+# [Unit] : placées dans [Service], systemd les ignore avec un avertissement.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
 [Service]
 Type=simple
 User=pcia
@@ -19,8 +24,6 @@ ExecStart=/usr/bin/node /opt/pcia-control-center/dist-server/server/src/fand.js
 # Redémarrage automatique : la ventilation est critique.
 Restart=on-failure
 RestartSec=2
-StartLimitIntervalSec=60
-StartLimitBurst=5
 
 # Arrêt ordonné : consigne sûre, restitution au BIOS, vérification.
 # Le délai doit rester supérieur à la durée de cette séquence.
@@ -30,8 +33,14 @@ TimeoutStopSec=30
 # Écriture des sorties PWM : accès en écriture à /sys/class/hwmon.
 # Fourni par la règle udev 99-pcia-hwmon.rules (groupe pcia), sans root.
 ReadWritePaths=/var/lib/pcia-control-center /run/pcia-control-center /sys/class/hwmon
+# /run/pcia-control-center est PARTAGÉ avec pcia-control-center.service : il
+# contient fand.sock, fan-engine.lock et fand-state.json. Sans
+# RuntimeDirectoryPreserve, redémarrer le serveur web supprimerait le
+# répertoire de travail du moteur (« EACCES: permission denied, mkdir »).
+# Le répertoire reste pcia:pcia en 0750.
 RuntimeDirectory=pcia-control-center
 RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=yes
 StateDirectory=pcia-control-center
 StateDirectoryMode=0750
 
@@ -50,7 +59,9 @@ RestrictNamespaces=true
 LockPersonality=true
 MemoryDenyWriteExecute=false
 SystemCallArchitectures=native
-# Un socket Unix local suffit : aucune socket réseau.
+# Un socket Unix local suffit : aucune socket réseau, et pas de Netlink — le
+# moteur n'énumère jamais les interfaces réseau (contrairement au serveur web,
+# qui a besoin d'AF_NETLINK pour os.networkInterfaces()).
 RestrictAddressFamilies=AF_UNIX
 
 # Surveillance : le moteur publie un heartbeat dans son fichier d'état ; la
