@@ -20,6 +20,8 @@ export interface TestEnv {
   repos: Repositories;
   hwmon: SimulatedHwmonBackend;
   world: DemoWorld;
+  /** Ferme SQLite comme le font `pcia-fand` et le serveur web à l'arrêt. */
+  closeDb(): void;
   cleanup(): void;
 }
 
@@ -41,18 +43,23 @@ export function createTestEnv(overrides: Record<string, unknown> = {}): TestEnv 
   const repos = createRepositories(db);
   seedDefaults(repos);
 
+  const closeDb = () => {
+    try {
+      db.close();
+    } catch {
+      /* déjà fermée */
+    }
+  };
+
   return {
     dir,
     config,
     repos,
     hwmon,
     world,
+    closeDb,
     cleanup() {
-      try {
-        db.close();
-      } catch {
-        /* déjà fermée */
-      }
+      closeDb();
       rmSync(dir, { recursive: true, force: true });
     },
   };

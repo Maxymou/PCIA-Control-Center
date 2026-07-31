@@ -24,8 +24,6 @@ import { PASSIVE_COOLING_FANS } from './defaults.js';
 
 const log = createLogger('fan.calibration');
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
 export type CalibrationStep =
   | 'idle' | 'identify' | 'test-rpm' | 'detect-minimum'
   | 'test-software-control' | 'test-bios-return';
@@ -72,8 +70,31 @@ export interface CalibrationDeps {
 export class CalibrationController {
   private sessions = new Map<FanId, CalibrationSession>();
   private aborts = new Map<FanId, boolean>();
+  /** Étapes différées encore en vol, par sortie. Aucune ne rejette jamais. */
+  private running = new Map<FanId, Promise<void>>();
+  /** Réveils des attentes en cours : permet d'interrompre un palier sans délai. */
+  private pendingWaits = new Set<() => void>();
+  /** Arrêt demandé : plus aucune étape ne démarre. */
+  private closing = false;
+  /** Arrêt terminé : la base peut être fermée, plus aucun accès n'est tenté. */
+  private closed = false;
 
   constructor(private deps: CalibrationDeps) {}
+
+  /** Attente interruptible : `shutdown()` la réveille immédiatement au lieu de
+   *  laisser un timer survivre à la fermeture de la base. */
+  private sleep(ms: number): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const entry: { timer?: ReturnType<typeof setTimeout> } = {};
+      const done = () => {
+        if (entry.timer !== undefined) clearTimeout(entry.timer);
+        this.pendingWaits.delete(done);
+        resolve();
+      };
+      entry.timer = setTimeout(done, ms);
+      this.pendingWaits.add(done);
+    });
+  }
 
   // =====================================================================
   // Découverte
@@ -189,7 +210,7 @@ export class CalibrationController {
     }
     session.message = 'Arrêt d’urgence : consigne portée à 100 %, restauration en cours.';
     this.notify(fanId);
-    await sleep(500);
+    await this.sleep(500);
     await this.restoreInitial(session, 'arrêt d’urgence');
     this.sessions.delete(fanId);
     this.aborts.delete(fanId);
@@ -199,23 +220,74 @@ export class CalibrationController {
     return { ok: true };
   }
 
+  /** Restaure l'état PWM mémorisé à l'ouverture de la session.
+   *
+   *  Ne rejette jamais : cette méthode est appelée depuis des chemins différés
+   *  (échec d'étape, arrêt du service) où un rejet deviendrait un
+   *  `unhandledRejection`. La lecture en base est incluse dans le `try` : après
+   *  `shutdown()` la connexion SQLite peut être fermée, et la restitution
+   *  matérielle doit malgré tout être tentée. */
   private async restoreInitial(session: CalibrationSession, cause: string): Promise<void> {
     const hwmon = this.deps.engine.hwmonBackend();
-    const record = this.deps.repos.calibration.get(session.fanId);
     try {
       if (session.initial.pwmPercent !== null) {
         hwmon.writePwmPercent(session.outputKey, session.initial.pwmPercent);
       }
       if (session.initial.enableMode !== null) {
         hwmon.writeEnableMode(session.outputKey, session.initial.enableMode);
-      } else if (record.biosReturn === 'CONFIRMED' && record.biosEnableMode !== null) {
-        // Mode initial inconnu : retour BIOS si celui-ci a été validé.
-        hwmon.writeEnableMode(session.outputKey, record.biosEnableMode);
+      } else if (!this.closed) {
+        const record = this.deps.repos.calibration.get(session.fanId);
+        if (record.biosReturn === 'CONFIRMED' && record.biosEnableMode !== null) {
+          // Mode initial inconnu : retour BIOS si celui-ci a été validé.
+          hwmon.writeEnableMode(session.outputKey, record.biosEnableMode);
+        }
       }
       log.info('État initial restauré', { fanId: session.fanId, cause });
     } catch (err) {
       log.error('Restauration de l’état initial impossible', { fanId: session.fanId, cause, error: err });
     }
+  }
+
+  // =====================================================================
+  // Arrêt propre
+  // =====================================================================
+
+  /** Termine proprement toute calibration en cours **avant** la fermeture de la
+   *  base et l'arrêt du moteur.
+   *
+   *  1. interrompt les étapes différées et réveille leurs attentes ;
+   *  2. attend leur terminaison effective ;
+   *  3. restaure l'état PWM initial de chaque session encore ouverte ;
+   *  4. interdit tout accès ultérieur à la base.
+   *
+   *  Appelée par `FanHost.stop()`. Sans cela, un callback différé pouvait
+   *  reprendre la main après `db.close()` et produire un rejet non géré
+   *  (« The database connection is not open »). */
+  async shutdown(): Promise<void> {
+    if (this.closing) return;
+    this.closing = true;
+
+    for (const fanId of this.sessions.keys()) this.aborts.set(fanId, true);
+
+    // Les étapes peuvent enchaîner une courte attente après leur réveil : on
+    // relance le cycle réveil/attente jusqu'à ce que plus rien ne soit en vol.
+    for (let pass = 0; pass < 5 && this.running.size > 0; pass++) {
+      for (const wake of [...this.pendingWaits]) wake();
+      await Promise.allSettled([...this.running.values()]);
+    }
+    if (this.running.size > 0) {
+      log.warn('Étapes de calibration encore en vol à l’arrêt', { count: this.running.size });
+    }
+
+    // Restitution matérielle tant que la base est encore ouverte.
+    for (const session of this.sessions.values()) {
+      await this.restoreInitial(session, 'arrêt du service');
+    }
+
+    this.sessions.clear();
+    this.aborts.clear();
+    this.pendingWaits.clear();
+    this.closed = true;
   }
 
   // =====================================================================
@@ -712,6 +784,8 @@ export class CalibrationController {
   }
 
   private saveRecord(record: CalibrationRecord): void {
+    // Après `shutdown()`, la base peut être fermée : plus aucune écriture.
+    if (this.closed) return;
     this.deps.repos.calibration.save(record);
     this.deps.engine.reloadCalibration(record.fanId);
     this.notify(record.fanId);
@@ -727,7 +801,7 @@ export class CalibrationController {
     const manual = record.manualEnableMode ?? MANUAL_ENABLE_MODE;
     if (current === manual) return;
     hwmon.writeEnableMode(session.outputKey, manual);
-    await sleep(300);
+    await this.sleep(300);
     const after = hwmon.readEnableMode(session.outputKey);
     if (after !== manual) {
       throw new HwmonError(`Le pilote refuse le mode manuel (lu : ${after})`, 'UNSUPPORTED');
@@ -747,6 +821,7 @@ export class CalibrationController {
     step: CalibrationStep,
     body: (session: CalibrationSession, ctx: StepContext) => Promise<void>,
   ): { ok: boolean; error?: string } {
+    if (this.closing) return { ok: false, error: 'Arrêt en cours : aucune nouvelle étape.' };
     const session = this.sessions.get(fanId);
     if (!session) return { ok: false, error: 'Aucune calibration en cours pour cette sortie.' };
     if (session.busy) return { ok: false, error: 'Une étape est déjà en cours.' };
@@ -767,16 +842,22 @@ export class CalibrationController {
       wait: async (ms, from, to) => {
         const slices = Math.max(1, Math.ceil(ms / 500));
         for (let i = 0; i < slices; i++) {
-          if (this.aborts.get(fanId)) throw new CalibrationAborted();
+          if (this.aborts.get(fanId) || this.closing) throw new CalibrationAborted();
           this.assertThermallySafe(fanId);
-          await sleep(Math.min(500, ms - i * 500));
+          await this.sleep(Math.min(500, ms - i * 500));
+          // `shutdown()` réveille l'attente sans attendre le timer : il faut
+          // sortir immédiatement, avant toute nouvelle écriture ou lecture.
+          if (this.aborts.get(fanId) || this.closing) throw new CalibrationAborted();
           session.progress = from + ((to - from) * (i + 1)) / slices;
           this.notify(fanId);
         }
       },
     };
 
-    void (async () => {
+    // Cette tâche différée ne doit JAMAIS rejeter : elle n'est pas attendue par
+    // l'appelant, donc un rejet remonterait en `unhandledRejection` (typiquement
+    // « The database connection is not open » si SQLite a été fermée entre-temps).
+    const task = (async () => {
       try {
         await body(session, ctx);
       } catch (err) {
@@ -793,8 +874,14 @@ export class CalibrationController {
         session.progress = 1;
         this.notify(fanId);
       }
-    })();
+    })().catch((err) => {
+      // Filet de sécurité : rien ne doit s'échapper de l'étape différée.
+      log.error('Étape de calibration interrompue anormalement', { fanId, step, error: err });
+    }).finally(() => {
+      if (this.running.get(fanId) === task) this.running.delete(fanId);
+    });
 
+    this.running.set(fanId, task);
     return { ok: true };
   }
 

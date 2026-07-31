@@ -301,3 +301,79 @@ describe('autorisation', () => {
     );
   }, 180_000);
 });
+
+// =====================================================================
+// Arrêt du service pendant une calibration
+// =====================================================================
+//
+// Régression observée sur Ubuntu Server : une étape de calibration différée
+// reprenait la main après `db.close()` et produisait un rejet non géré
+// (« TypeError: The database connection is not open » depuis
+// CalibrationController.restoreInitial). `FanHost.stop()` doit désormais
+// interrompre et attendre les étapes en vol, puis restaurer l'état PWM
+// initial, avant l'arrêt du moteur et avant que l'appelant ferme SQLite.
+
+describe('arrêt pendant une calibration', () => {
+  it('interrompt l’étape en cours et referme la session', async () => {
+    const key = env.hwmon.outputKeyByLabel('CPU_FAN1')!;
+    expect(host.calibration.start('CPU_FAN1', key).ok).toBe(true);
+    expect(host.calibration.identify('CPU_FAN1').ok).toBe(true);
+    await sleep(250);
+    expect(host.calibration.session('CPU_FAN1')?.busy).toBe(true);
+
+    await host.stop();
+
+    expect(host.calibration.sessionsList()).toHaveLength(0);
+    expect(host.calibration.session('CPU_FAN1')).toBeNull();
+  }, 60_000);
+
+  it('restaure l’état PWM initial avant la fermeture de la base', async () => {
+    const key = env.hwmon.outputKeyByLabel('CPU_FAN1')!;
+    host.calibration.start('CPU_FAN1', key);
+    const initialMode = host.calibration.session('CPU_FAN1')!.initial.enableMode;
+    const initialPwm = host.calibration.session('CPU_FAN1')!.initial.pwmPercent;
+    expect(initialMode).toBe(SIM_MODE_BIOS);
+
+    host.calibration.detectMinimum('CPU_FAN1');
+    await waitFor(() => env.hwmon.readEnableMode(key) === SIM_MODE_MANUAL, 6000, 'passage en mode manuel');
+
+    await host.stop();
+    env.closeDb();
+
+    expect(env.hwmon.readEnableMode(key)).toBe(initialMode);
+    expect(env.hwmon.readPwmPercent(key)).toBe(initialPwm);
+  }, 60_000);
+
+  it('ne produit aucun rejet de promesse non géré si SQLite est fermée juste après', async () => {
+    const rejections: unknown[] = [];
+    const onRejection = (reason: unknown) => rejections.push(reason);
+    process.on('unhandledRejection', onRejection);
+    try {
+      const key = env.hwmon.outputKeyByLabel('CPU_FAN1')!;
+      host.calibration.start('CPU_FAN1', key);
+      // Étape longue, qui écrit en base à plusieurs reprises.
+      host.calibration.identify('CPU_FAN1');
+      await sleep(300);
+
+      // Séquence exacte de `pcia-fand` : arrêt de l'hôte, puis fermeture de la base.
+      await host.stop();
+      env.closeDb();
+
+      // Laisse le temps à un éventuel callback résiduel de se manifester.
+      await sleep(800);
+      expect(rejections).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onRejection);
+    }
+  }, 60_000);
+
+  it('refuse toute nouvelle étape une fois l’arrêt engagé', async () => {
+    const key = env.hwmon.outputKeyByLabel('CPU_FAN1')!;
+    host.calibration.start('CPU_FAN1', key);
+    await host.stop();
+
+    // Plus aucune session : l'étape est refusée, sans écriture matérielle ni base.
+    expect(host.calibration.identify('CPU_FAN1').ok).toBe(false);
+    expect(host.calibration.testRpm('CPU_FAN1').ok).toBe(false);
+  }, 60_000);
+});

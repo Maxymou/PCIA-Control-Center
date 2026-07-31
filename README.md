@@ -98,7 +98,7 @@ server/src/
 ├── http/               serveur Fastify, routes, WebSocket, contrôle d'accès
 └── demo/               monde simulé du mode démonstration
 
-server/test/            181 tests (aucun n'accède au matériel réel)
+server/test/            212 tests (aucun n'accède au matériel réel)
 packaging/              unités systemd, règle udev, scripts d'installation
 ```
 
@@ -109,11 +109,17 @@ packaging/              unités systemd, règle udev, scripts d'installation
 **Obligatoire :**
 
 - Ubuntu 22.04 ou plus récent (toute distribution avec `systemd` et `/sys` convient)
-- Node.js 20 ou plus récent, npm
+- Node.js **22 ou plus récent**, npm
+  (version validée sur la machine de référence : Node.js 22.22.1)
 
 ```bash
 sudo apt install nodejs npm
+node -v      # doit afficher v22.x ou plus
 ```
+
+Si les dépôts de la distribution fournissent une version antérieure à 22,
+installer Node.js 22 depuis [NodeSource](https://github.com/nodesource/distributions).
+Le script d'installation refuse de continuer avec une version antérieure à 22.
 
 **Recommandé** — chaque outil absent dégrade une fonction sans empêcher le
 démarrage ; l'interface indique alors ce qui est indisponible :
@@ -123,9 +129,12 @@ sudo apt install lm-sensors smartmontools nvme-cli pciutils
 sudo sensors-detect        # détecte le contrôleur Super-IO de la carte mère
 ```
 
+Le paquet Ubuntu s'appelle `lm-sensors`, mais la commande installée est
+`sensors` (`/usr/bin/sensors`) : c'est elle que le script d'installation teste.
+
 | Outil | Sans lui |
 |---|---|
-| `lm-sensors` (module Super-IO) | pas de sorties PWM ni de RPM : supervision seule |
+| `sensors` — paquet `lm-sensors` (module Super-IO) | pas de sorties PWM ni de RPM : supervision seule |
 | `nvidia-smi` (pilote NVIDIA) | pas de température, charge ni consommation GPU |
 | `nvme-cli` ou `smartctl` | pas d'état SMART ni de santé du SSD |
 | `systemctl` | pas de détection des services système |
@@ -154,21 +163,50 @@ sudo ./packaging/install.sh
 
 Le script :
 
-1. vérifie les prérequis et signale les outils manquants ;
-2. crée l'utilisateur système `pcia` (sans shell, sans répertoire personnel) ;
-3. compile le front-end et le back-end ;
-4. installe dans `/opt/pcia-control-center` ;
-5. installe la configuration dans `/etc/pcia-control-center/config.yaml`
+1. vérifie les prérequis (Node.js 22 minimum, npm, `sensors`, `nvidia-smi`,
+   `smartctl`) et signale les outils manquants ;
+2. crée l'utilisateur et le groupe système `pcia` (sans shell, sans répertoire
+   personnel) ;
+3. installe les dépendances de développement puis compile le front-end et le
+   back-end ;
+4. **réinstalle ensuite les seules dépendances de production** (`npm ci --omit=dev`) :
+   Vite, Vitest, TypeScript, `tsx` et les plugins de build ne sont jamais copiés
+   dans `/opt/pcia-control-center/node_modules` ;
+5. installe dans `/opt/pcia-control-center`, en `root:root`, avec des
+   permissions explicites (`u=rwX,go=rX`) indépendantes de l'umask du build :
+   le compte `pcia` peut traverser et lire, rien ne lui est inscriptible ;
+6. installe la configuration dans `/etc/pcia-control-center/config.yaml`
    (une configuration existante est **sauvegardée**, jamais écrasée) ;
-6. crée `/var/lib/pcia-control-center` pour la base SQLite ;
-7. installe la règle udev donnant au groupe `pcia` le droit d'écrire les
+7. crée `/var/lib/pcia-control-center` pour la base SQLite ;
+8. installe la règle udev donnant au groupe `pcia` le droit d'écrire les
    fichiers `pwm*` — le service n'est **jamais exécuté en root** ;
-8. installe et démarre les deux services systemd.
+9. installe et démarre les deux services systemd.
 
 Le script ne modifie **pas** le pare-feu sans y être invité (`--open-firewall`),
 n'active **pas** le contrôle PWM et ne lance **pas** de calibration.
 
-`--dry-run` affiche toutes les actions sans en exécuter aucune.
+#### Simulation (`--dry-run`)
+
+```bash
+sudo ./packaging/install.sh --dry-run
+# ou, sans droits, sur un clone Git jamais compilé :
+bash packaging/install.sh --dry-run --prefix /tmp/pcia-control-center-test
+```
+
+`--dry-run` affiche l'intégralité des étapes prévues et sort avec le code `0`,
+y compris sur un clone neuf où `dist/`, `dist-server/` et `node_modules/`
+n'existent pas encore. Rien n'est compilé, copié, supprimé ni modifié : aucun
+utilisateur créé, aucune unité systemd installée, aucune règle udev déposée,
+aucun service démarré, aucun contrôle PWM activé.
+
+#### N'ajoutez aucun compte humain au groupe `pcia`
+
+Le groupe `pcia` donne le droit d'écrire directement dans
+`/sys/class/hwmon/*/pwm*`. Y ajouter un compte utilisateur permettrait de
+piloter les ventilateurs **en dehors de toutes les sécurités applicatives** :
+plancher des cartes passives, restitution au BIOS, détection de blocage,
+consigne de secours en cas de perte de capteur. Ce groupe est réservé au compte
+de service `pcia` utilisé par `pcia-fan-control.service`.
 
 ### Ouverture du port
 
@@ -181,13 +219,15 @@ sudo ufw allow 4321/tcp
 ### Installation manuelle
 
 ```bash
-npm install
+npm ci                        # dépendances de build incluses
 npm run build                 # front-end (dist/) + back-end (dist-server/)
+npm ci --omit=dev             # node_modules de production uniquement
 sudo mkdir -p /etc/pcia-control-center /var/lib/pcia-control-center
 sudo cp packaging/config.example.yaml /etc/pcia-control-center/config.yaml
 sudo cp packaging/systemd/*.service /etc/systemd/system/
 sudo cp packaging/udev/99-pcia-hwmon.rules /etc/udev/rules.d/
-sudo udevadm control --reload-rules && sudo udevadm trigger --subsystem-match=hwmon
+sudo udevadm control --reload-rules
+sudo udevadm trigger --action=add --subsystem-match=hwmon
 sudo systemctl daemon-reload
 sudo systemctl enable --now pcia-fan-control pcia-control-center
 ```
@@ -259,6 +299,50 @@ Emplacements respectant les conventions Linux :
 /run/pcia-control-center/     socket, verrou, fichier d'état
 journalctl                    journaux (aucun fichier de log propre)
 ```
+
+### Un seul moteur de ventilation — `fan_control.embedded`
+
+Le serveur web peut héberger un moteur de ventilation embarqué. En production
+il ne doit **jamais** le faire : `pcia-fan-control.service` est l'unique moteur.
+
+| Valeur | Usage |
+|---|---|
+| `never` | **configuration livrée** (`packaging/config.example.yaml`). Le serveur web ne construit aucun `FanHost` et pilote le daemon par IPC. Aucune course possible sur le verrou. |
+| `auto` | **défaut logiciel du code**, pour le développement, le mode démonstration et une exécution mono-processus sans daemon. Le moteur embarqué ne démarre que si le verrou est libre. |
+| `always` | déploiement mono-processus volontaire, sans systemd. Si le verrou est déjà détenu, le serveur reste en supervision seule. |
+
+```yaml
+fan_control:
+  embedded: never      # production systemd
+```
+
+En production, le serveur web communique donc avec le daemon par IPC :
+
+```
+/run/pcia-control-center/fand.sock          socket de commande
+/run/pcia-control-center/fan-engine.lock    verrou exclusif du moteur
+/run/pcia-control-center/fand-state.json    état + heartbeat
+```
+
+Les deux unités déclarent `RuntimeDirectory=pcia-control-center` **et**
+`RuntimeDirectoryPreserve=yes` : sans cette dernière directive, arrêter ou
+redémarrer l'un des deux services supprimerait le répertoire encore utilisé par
+l'autre, qui échouerait ensuite sur `EACCES: permission denied, mkdir
+'/run/pcia-control-center'`. Le répertoire reste `pcia:pcia` en mode `0750`.
+
+#### Mise à jour depuis une version antérieure
+
+Le script d'installation **ne modifie jamais** une configuration existante : il
+la sauvegarde et dépose le nouveau modèle en `config.example.yaml`. Après une
+mise à jour, un `/etc/pcia-control-center/config.yaml` hérité contenant :
+
+```yaml
+fan_control:
+  embedded: auto
+```
+
+doit être passé à `embedded: never` pour un déploiement systemd standard, sans
+quoi le serveur web tenterait de démarrer un second moteur.
 
 Si ces répertoires ne sont pas accessibles en écriture (exécution sans droits),
 le back-end se replie sur `~/.local/state/pcia-control-center/` **et le signale**.
@@ -601,10 +685,11 @@ seul composant.
 npm test
 ```
 
-181 tests, aucun n'accède au matériel réel : tout passe par un backend hwmon
+212 tests, aucun n'accède au matériel réel : tout passe par un backend hwmon
 simulé qui reproduit variation de RPM, panne de capteur, écriture refusée,
 retour BIOS, changement d'index `hwmon`, disparition d'une sortie et
-remplacement d'un contrôleur.
+remplacement d'un contrôleur. Aucune calibration ni aucun contrôle PWM réel
+n'est exécuté, et la suite ne laisse **aucun rejet de promesse non géré**.
 
 | Fichier | Couverture |
 |---|---|
@@ -613,9 +698,31 @@ remplacement d'un contrôleur.
 | `hwmon.test.ts` | identité stable, scénarios de panne matérielle |
 | `sensors.test.ts` | agrégation et association des capteurs |
 | `engine.test.ts` | transitions d'état, failsafe, verrou, arrêt, redémarrage |
-| `calibration.test.ts` | parcours complet, refus, restauration, arrêt d'urgence |
+| `calibration.test.ts` | parcours complet, refus, restauration, arrêt d'urgence, arrêt pendant une calibration |
+| `deployment.test.ts` | exclusivité du moteur, runtime partagé, verrou orphelin, configuration livrée, unités systemd |
 | `repositories.test.ts` | migrations, corrections, conflits, historique |
 | `api.test.ts` | routes REST, WebSocket, export/import, mode démo |
+
+`deployment.test.ts` couvre en particulier la topologie systemd réelle :
+
+- arrêt du serveur web pendant que le daemon reste actif ;
+- redémarrages répétés du serveur sans destruction du runtime du daemon ;
+- exclusivité entre moteur autonome et moteur embarqué ;
+- absence de double moteur en production (`embedded: never`) ;
+- reprise d'un verrou orphelin et détection d'un verrou vivant ;
+- configuration livrée à `never`, défaut logiciel conservé à `auto` ;
+- absence d'activation automatique du PWM ;
+- priorité des variables d'environnement sur le fichier YAML ;
+- `StartLimit*` en `[Unit]`, `RuntimeDirectoryPreserve=yes`, `AF_NETLINK`
+  réservé au serveur web.
+
+Vérification des unités systemd :
+
+```bash
+systemd-analyze verify \
+  packaging/systemd/pcia-control-center.service \
+  packaging/systemd/pcia-fan-control.service
+```
 
 ---
 
@@ -744,9 +851,15 @@ node /opt/pcia-control-center/dist-server/server/src/cli.js discover
 ```bash
 ls -l /sys/class/hwmon/hwmon*/pwm1        # groupe attendu : pcia
 sudo udevadm control --reload-rules
-sudo udevadm trigger --subsystem-match=hwmon
+sudo udevadm trigger --action=add --subsystem-match=hwmon
 id pcia                                    # doit appartenir au groupe pcia
 ```
+
+`--action=add` est indispensable : la règle `99-pcia-hwmon.rules` ne se
+déclenche que sur `ACTION=="add"`. Sans cette option, `udevadm` émet un
+événement « change » et rien n'est appliqué. La règle n'active **aucun**
+contrôle PWM : elle ne fait qu'attribuer les fichiers `pwm*` au groupe `pcia`
+et y ajouter le droit d'écriture.
 
 **Le moteur de ventilation est signalé hors ligne**
 
@@ -758,6 +871,48 @@ ls -l /run/pcia-control-center/            # fand.sock, fan-engine.lock
 
 Si le verrou est détenu par un processus disparu, il est repris
 automatiquement au démarrage suivant.
+
+**`ERR_SYSTEM_ERROR: uv_interface_addresses returned Unknown system error 97`**
+
+Le serveur web plante au démarrage. `os.networkInterfaces()`, appelé par
+Fastify, interroge le noyau via **Netlink** sous Linux. Le durcissement de
+l'unité doit donc autoriser cette famille d'adresses :
+
+```ini
+# pcia-control-center.service, section [Service]
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+```
+
+Le daemon de ventilation, lui, n'énumère jamais les interfaces réseau :
+`AF_NETLINK` ne lui est **pas** accordé (`RestrictAddressFamilies=AF_UNIX`).
+
+**`EACCES: permission denied, mkdir '/run/pcia-control-center'`**
+
+Le répertoire runtime est partagé par les deux services. Sans
+`RuntimeDirectoryPreserve=yes`, arrêter ou redémarrer l'un supprime le
+répertoire encore utilisé par l'autre. Les deux unités livrées déclarent :
+
+```ini
+RuntimeDirectory=pcia-control-center
+RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=yes
+```
+
+Vérifier l'état attendu :
+
+```bash
+ls -ld /run/pcia-control-center            # drwxr-x--- pcia pcia
+```
+
+**Un service redémarre en boucle sans que systemd ne l'arrête**
+
+`StartLimitIntervalSec` et `StartLimitBurst` appartiennent à la section
+`[Unit]`. Placées dans `[Service]`, systemd les ignore :
+
+```bash
+systemd-analyze verify /etc/systemd/system/pcia-*.service
+# ... Unknown key name 'StartLimitIntervalSec' in section 'Service', ignoring.
+```
 
 **Les ventilateurs semblent figés après un arrêt**
 
@@ -812,4 +967,4 @@ d'origine et doit être refaite localement.
 ## Stack
 
 React 18 · TypeScript · Vite · @xyflow/react · @dagrejs/dagre · Zustand · Recharts
-Node.js 20+ · Fastify · better-sqlite3 · zod · ws · Vitest
+Node.js 22+ (validé sur 22.22.1) · Fastify · better-sqlite3 · zod · ws · Vitest

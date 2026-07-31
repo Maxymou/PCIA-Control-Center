@@ -16,6 +16,7 @@ import { createRepositories, seedDefaults } from './db/repositories.js';
 import { AppState } from './app/state.js';
 import { FanGateway } from './app/fanGateway.js';
 import { FanHost } from './fan/host.js';
+import { startEmbeddedFanHost } from './fan/embedded.js';
 import { buildHttpServer, resolveStaticDir } from './http/server.js';
 import { WsHub } from './http/ws.js';
 import type { ApiContext } from './http/context.js';
@@ -42,24 +43,19 @@ async function main(): Promise<void> {
   if (env.demo) seedDemoCalibration(repos, env.hwmon as SimulatedHwmonBackend);
 
   // ---------- Moteur de ventilation ----------
-  let embeddedFanHost: FanHost | null = null;
-  if (config.fanControl.embedded !== 'never') {
-    const candidate = new FanHost({
-      config,
-      repos,
-      hwmon: env.hwmon,
-      mode: env.mode,
-      gpuProvider: gpuProviderFor(env),
-    });
-    const started = candidate.start();
-    if (started.started) {
-      embeddedFanHost = candidate;
-      log.info('Moteur de ventilation embarqué démarré', { mode: env.mode });
-    } else if (config.fanControl.embedded === 'always') {
-      log.error('Moteur embarqué imposé mais verrou déjà détenu — supervision seule', { pid: started.heldBy });
-    } else {
-      log.info('Moteur externe détecté : l’API se contente de le piloter', { pid: started.heldBy });
-    }
+  // En production (configuration livrée : `embedded: never`), rien n'est
+  // construit ici : pcia-fan-control.service est l'unique moteur et le serveur
+  // web le pilote par IPC.
+  const embedded = startEmbeddedFanHost(config, () => new FanHost({
+    config,
+    repos,
+    hwmon: env.hwmon,
+    mode: env.mode,
+    gpuProvider: gpuProviderFor(env),
+  }));
+  const embeddedFanHost = embedded.host;
+  if (embedded.outcome === 'started') {
+    log.info('Moteur de ventilation embarqué démarré', { mode: env.mode });
   }
 
   const fans = new FanGateway(config, embeddedFanHost);

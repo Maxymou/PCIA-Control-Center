@@ -1,11 +1,29 @@
 # Accès aux sorties PWM pour PCIA Control Center, sans exécuter le service en root.
 #
-# Donne au groupe `pcia` le droit d'écrire les fichiers de contrôle de
+# Donne au groupe système `pcia` le droit d'écrire les fichiers de contrôle de
 # ventilation exposés par les pilotes hwmon. Rien d'autre n'est ouvert :
 # ni les capteurs d'autres sous-systèmes, ni les périphériques bruts.
 #
+# CETTE RÈGLE N'ACTIVE AUCUN CONTRÔLE PWM.
+# Elle ne fait qu'ajuster les droits (groupe + bit d'écriture) sur les attributs
+# pwm* déjà exposés par le noyau. Elle n'écrit jamais dans pwm*_enable, ne change
+# aucune consigne et laisse toutes les sorties sous contrôle du BIOS. Le passage
+# sous contrôle logiciel n'a lieu qu'après la calibration guidée, sortie par
+# sortie, depuis l'interface.
+#
+# AVERTISSEMENT — n'ajoutez AUCUN compte humain au groupe `pcia`.
+# Appartenir à ce groupe permet d'écrire directement dans /sys/class/hwmon/*/pwm*,
+# donc de piloter les ventilateurs en dehors de toutes les sécurités applicatives
+# (plancher des cartes passives, restitution au BIOS, détection de blocage,
+# consigne de secours en cas de perte de capteur). Ce groupe est réservé au
+# compte de service `pcia` utilisé par pcia-fan-control.service.
+#
 # À installer dans /etc/udev/rules.d/ puis :
-#   sudo udevadm control --reload-rules && sudo udevadm trigger --subsystem-match=hwmon
+#   sudo udevadm control --reload-rules
+#   sudo udevadm trigger --action=add --subsystem-match=hwmon
+#
+# `--action=add` est nécessaire : la règle ne se déclenche que sur ACTION=="add".
+# Sans cette option, udevadm émet un événement « change » et rien n'est appliqué.
 #
 # Les attributs pwm* n'existent que sur les contrôleurs qui savent piloter des
 # ventilateurs (Super-IO de la carte mère). Les autres ne sont pas concernés.

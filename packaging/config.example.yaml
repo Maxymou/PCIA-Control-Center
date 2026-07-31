@@ -78,7 +78,20 @@ fan_control:
   #   auto   : seulement si aucun daemon pcia-fand ne détient le verrou ;
   #   always : déploiement mono-processus (sans systemd) ;
   #   never  : le daemon est obligatoire.
-  embedded: auto
+  #
+  # La configuration LIVRÉE impose `never` : en production, pcia-fan-control.service
+  # est l'unique moteur de ventilation, et le serveur web le pilote par IPC via
+  # /run/pcia-control-center/fand.sock. Aucun FanHost embarqué n'est démarré par
+  # le serveur web, donc aucune course possible sur fan-engine.lock.
+  #
+  # Le défaut logiciel du code reste `auto`, utile hors systemd : développement,
+  # mode démonstration, exécution mono-processus. `always` ne se justifie que pour
+  # un déploiement mono-processus volontaire, sans daemon.
+  #
+  # Après une mise à jour depuis une ancienne version, un config.yaml existant
+  # contenant `embedded: auto` doit être passé à `never` pour un déploiement
+  # systemd standard (le script d'installation ne modifie jamais votre config).
+  embedded: never
 
 calibration:
   identify_step_seconds: 6
