@@ -4,6 +4,7 @@ import { SEVERITY_LABELS } from '../utils/labels';
 import { fmtTime } from '../utils/format';
 import { providerInfo } from '../services/dataService';
 import { StatusDot } from './Common';
+import { formatAge, useConnectionState } from '../ui/useConnectionState';
 
 /** Libellé de la source de données réellement utilisée. */
 const SOURCE_LABELS: Record<string, string> = {
@@ -24,18 +25,35 @@ export function Header({ onOpenAlerts }: { onOpenAlerts: () => void }) {
   const status = useGlobalStatus();
   const alerts = useActiveAlerts();
   const time = useLiveStore((s) => s.snap.time);
-  const backend = useLiveStore((s) => s.snap.backendConnected);
   const system = useLiveStore((s) => s.snap.system);
   const critical = alerts.filter((a) => a.level === 'critical').length;
+  // Même source que le bandeau d'état : l'en-tête ne peut pas annoncer une
+  // liaison saine pendant que le bandeau signale une coupure.
+  const link = useConnectionState();
 
   const provider = providerInfo();
   const mode = system?.mode ?? provider.mode;
   const sourceLabel = SOURCE_LABELS[mode] ?? mode;
   const sourceTitle = provider.kind === 'mock'
     ? `Aucun back-end joignable : données simulées dans le navigateur.${provider.fallbackReason ? ` (${provider.fallbackReason})` : ''}`
-    : mode === 'demo'
-      ? 'Back-end en mode démonstration : les mesures sont simulées côté serveur.'
-      : `Back-end en mode matériel${system?.degraded ? ' (dégradé)' : ''} — version ${system?.version ?? provider.version ?? '?'}`;
+    : link.status !== 'live'
+      ? `Dernières mesures reçues ${formatAge(link.ageMs)}. Les commandes matérielles sont désactivées.`
+      : mode === 'demo'
+        ? 'Back-end en mode démonstration : les mesures sont simulées côté serveur.'
+        : `Back-end en mode matériel${system?.degraded ? ' (dégradé)' : ''} — version ${system?.version ?? provider.version ?? '?'}`;
+
+  /** Libellé et gravité de la pastille de liaison, alignés sur l'état réel. */
+  const LINK_LABEL = {
+    live: 'Back-end connecté',
+    stale: 'Données non actualisées',
+    offline: 'Back-end déconnecté',
+    simulation: 'Simulation locale',
+  } as const;
+  const linkSeverity = link.status === 'live'
+    ? (system?.degraded ? 'warning' : 'normal')
+    : link.status === 'stale' ? 'warning'
+      : link.status === 'simulation' ? 'unknown'
+        : 'critical';
 
   return (
     <header className="header">
@@ -76,10 +94,8 @@ export function Header({ onOpenAlerts }: { onOpenAlerts: () => void }) {
         )}
 
         <span className="backend-pill" title={sourceTitle}>
-          <StatusDot sev={backend ? (system?.degraded ? 'warning' : 'normal') : 'critical'} />
-          <span className="backend-pill__text">
-            Back-end {backend ? 'connecté' : 'déconnecté'}
-          </span>
+          <StatusDot sev={linkSeverity} />
+          <span className="backend-pill__text">{LINK_LABEL[link.status]}</span>
           <span className="muted backend-pill__mode">· {sourceLabel}</span>
         </span>
 

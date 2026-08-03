@@ -8,6 +8,7 @@
 import type { ReactNode } from 'react';
 import { useIsDesktop, useIsMobile } from './useBreakpoint';
 import { BottomNav, SideNav } from './Navigation';
+import { ConnectionBanner } from './ConnectionBanner';
 import { SECTION_BY_ID, type SectionId } from './sections';
 
 interface AppShellProps {
@@ -50,6 +51,14 @@ export function AppShell({ header, current, onSelect, alertCount, children }: Ap
           {/* Titre de niveau 1 de la section : la hiérarchie des titres reste
               cohérente d'une section à l'autre, sans saut de niveau. */}
           <h1 className="sr-only">{section.label} — {section.description}</h1>
+
+          {/* État de la liaison : visible depuis toutes les sections, jamais
+              seulement depuis la Vue d'ensemble. Une donnée périmée doit se
+              voir là où l'utilisateur agit. */}
+          <div className="app-main__banner">
+            <ConnectionBanner />
+          </div>
+
           {children}
         </main>
       </div>

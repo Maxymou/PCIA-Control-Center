@@ -1101,3 +1101,17 @@
   background: transparent;
   border: none;
 }
+
+/* Bandeau d'état de la liaison, au-dessus du contenu de chaque section. Il ne
+ * se replie pas : tant que les données ne sont pas fraîches, il occupe sa
+ * place. Vide, il ne rend rien et ne laisse aucun espace. */
+.app-main__banner:not(:empty) {
+  flex: none;
+  padding: var(--sp-3) var(--sp-4) 0;
+}
+
+@media (max-width: 767px) {
+  .app-main__banner:not(:empty) {
+    padding: var(--sp-2) var(--sp-3) 0;
+  }
+}

@@ -13,6 +13,8 @@ import { StatusDot } from '../components/Common';
 import { providerInfo } from '../services/dataService';
 import { useUiStore } from '../store/useUiStore';
 import { useIsMobile } from '../ui/useBreakpoint';
+import { Measure, ProvenanceBadge, useProvenance } from '../ui/Measure';
+import { formatAge, useConnectionState } from '../ui/useConnectionState';
 import type { SectionId } from '../ui/sections';
 
 const MODE_LABELS: Record<string, string> = {
@@ -62,6 +64,8 @@ export function OverviewSection() {
   const alerts = useActiveAlerts();
   const status = useGlobalStatus();
   const isMobile = useIsMobile();
+  const link = useConnectionState();
+  const { base, missingFor } = useProvenance();
 
   const cpu = hardware.find((h) => h.id === 'cpu');
   const nvme = hardware.find((h) => h.id === 'nvme');
@@ -90,28 +94,54 @@ export function OverviewSection() {
           </StatCard>
 
           <StatCard label="Mode d’exécution" goTo="settings" hint={system?.degraded ? 'Supervision dégradée' : undefined}>
-            <div className="big big--text">{MODE_LABELS[mode] ?? mode}</div>
+            <div className="row">
+              <span className="big big--text">{MODE_LABELS[mode] ?? mode}</span>
+              <ProvenanceBadge provenance={base} />
+            </div>
           </StatCard>
 
           <StatCard label="Processeur" goTo="hardware" hint={cpu?.metrics.load !== undefined ? `${cpu.metrics.load} % de charge` : undefined}>
             <div className={`big sev-${cpu?.metrics.status ?? 'unknown'}`}>
-              {cpu?.metrics.temp !== undefined ? `${cpu.metrics.temp.toFixed(0)} °C` : '—'}
+              <Measure
+                value={cpu?.metrics.temp}
+                unit="°C"
+                provenance={base}
+                missingAs={missingFor('canReadTemperature')}
+              />
             </div>
           </StatCard>
 
-          <StatCard label="GPU le plus chaud" goTo="hardware" hint={hottestGpu?.name}>
+          <StatCard label="GPU le plus chaud" goTo="hardware" hint={hottestGpu?.name ?? 'Aucun GPU détecté'}>
             <div className={`big sev-${hottestGpu?.metrics.status ?? 'unknown'}`}>
-              {hottestGpu?.metrics.temp !== undefined ? `${hottestGpu.metrics.temp.toFixed(0)} °C` : '—'}
+              <Measure
+                value={hottestGpu?.metrics.temp}
+                unit="°C"
+                provenance={base}
+                missingAs={missingFor('canReadTemperature')}
+              />
             </div>
           </StatCard>
 
           <StatCard label="Puissance GPU" goTo="hardware" hint={`${gpus.length} carte(s) détectée(s)`}>
-            <div className="big">{gpuPower > 0 ? `${Math.round(gpuPower)} W` : '—'}</div>
+            <div className="big">
+              <Measure
+                value={gpuPower > 0 ? gpuPower : null}
+                unit="W"
+                provenance={base}
+                missingAs={missingFor('canReadGpuPower')}
+                hint="somme des consommations instantanées des cartes détectées"
+              />
+            </div>
           </StatCard>
 
           <StatCard label="Stockage NVMe" goTo="hardware" hint={nvme?.metrics.health !== undefined ? `Santé ${nvme.metrics.health} %` : undefined}>
             <div className={`big sev-${nvme?.metrics.status ?? 'unknown'}`}>
-              {nvme?.metrics.temp !== undefined ? `${nvme.metrics.temp.toFixed(0)} °C` : '—'}
+              <Measure
+                value={nvme?.metrics.temp}
+                unit="°C"
+                provenance={base}
+                missingAs={missingFor('canReadStorageSmart')}
+              />
             </div>
           </StatCard>
 
@@ -135,7 +165,10 @@ export function OverviewSection() {
         <section className="card card-pad" aria-labelledby="apercu-ventilation">
           <div className="spread">
             <h2 className="card-title" id="apercu-ventilation" style={{ margin: 0 }}>Ventilation</h2>
-            <span className="small muted mono">Actualisé à {fmtTime(time)}</span>
+            <span className="small muted mono">
+              Actualisé à {fmtTime(time)}
+              {link.status !== 'live' && ` — ${formatAge(link.ageMs)}`}
+            </span>
           </div>
           {fans.length === 0 ? (
             <p className="muted small" style={{ margin: 0 }}>Aucune sortie de ventilation détectée.</p>
@@ -155,9 +188,12 @@ export function OverviewSection() {
                     </span>
                   </div>
                   <dl className="kv" style={{ marginTop: 'var(--sp-2)' }}>
-                    <dt>Consigne</dt><dd className="mono">{fan.pwm} %</dd>
-                    <dt>Vitesse</dt><dd className="mono">{fan.rpm} RPM</dd>
-                    <dt>Température de référence</dt><dd className="mono">{round1(fan.refTemp)} °C</dd>
+                    <dt>Consigne</dt>
+                    <dd><Measure value={fan.pwm} unit="%" provenance={base} /></dd>
+                    <dt>Vitesse</dt>
+                    <dd><Measure value={fan.rpm} unit="RPM" provenance={base} missingAs={missingFor('canReadRpm')} /></dd>
+                    <dt>Température de référence</dt>
+                    <dd><Measure value={round1(fan.refTemp)} unit="°C" digits={1} provenance={base} missingAs={missingFor('canReadTemperature')} /></dd>
                   </dl>
                 </li>
               ))}
@@ -188,9 +224,9 @@ export function OverviewSection() {
                           {fan.stalled && <span className="badge critical">Bloqué</span>}
                         </span>
                       </td>
-                      <td className="mono">{fan.pwm} %</td>
-                      <td className="mono">{fan.rpm} RPM</td>
-                      <td className="mono">{round1(fan.refTemp)} °C</td>
+                      <td><Measure value={fan.pwm} unit="%" provenance={base} /></td>
+                      <td><Measure value={fan.rpm} unit="RPM" provenance={base} missingAs={missingFor('canReadRpm')} /></td>
+                      <td><Measure value={round1(fan.refTemp)} unit="°C" digits={1} provenance={base} missingAs={missingFor('canReadTemperature')} /></td>
                     </tr>
                   ))}
                 </tbody>
