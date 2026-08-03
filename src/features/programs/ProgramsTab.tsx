@@ -14,14 +14,38 @@ import { GraphToolbar } from './GraphToolbar';
 import { SidePanel } from './SidePanel';
 import { ConnectionModal, GroupModal, HiddenModal, ServiceModal } from './Modals';
 import { Confirm } from '../../components/Common';
+import { ServiceListView } from './ServiceListView';
+import { Sheet } from '../../ui/Modal';
+import { useIsMobile } from '../../ui/useBreakpoint';
 
 const nodeTypes = { service: ServiceNode, group: GroupNode, groupCollapsed: GroupCollapsedNode };
 
 function ProgramsInner() {
   const rf = useReactFlow();
+  const isMobile = useIsMobile();
+  // `auto` : la présentation suit la taille de l'écran — liste sous 768 px, où
+  // un graphe de nœuds de 210 px de large n'est pas lisible ; graphe au-delà.
+  // Dès que l'utilisateur choisit explicitement, son choix est respecté et ne
+  // change plus tout seul, y compris en rotation.
+  const [viewChoice, setViewChoice] = useState<'auto' | 'graph' | 'list'>('auto');
+  const effectiveView: 'graph' | 'list' = viewChoice === 'auto'
+    ? (isMobile ? 'list' : 'graph')
+    : viewChoice;
   const cfg = useConfigStore();
   const ui = useUiStore();
   const alerts = useLiveStore((s) => s.snap.alerts);
+  // Le tableau d'alertes est reconstruit à chaque mesure (toutes les 2 s), mais
+  // le graphe ne s'intéresse qu'à l'ensemble des cibles en alerte. On le réduit
+  // à une clé stable : sans cela, tout le graphe était reconstruit à chaque tick.
+  const alertKey = useMemo(
+    () => alerts.filter((a) => a.active).map((a) => `${a.targetKind}:${a.targetId}`).sort().join('|'),
+    [alerts],
+  );
+  const alertsForGraph = useMemo(
+    () => alerts.filter((a) => a.active),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [alertKey],
+  );
   const services = useVisibleServices();
   const serviceIds = useMemo(() => new Set(services.map((s) => s.id)), [services]);
   const connections = useVisibleConnections(serviceIds);
@@ -34,11 +58,11 @@ function ProgramsInner() {
 
   const derived = useMemo(
     () => buildGraph({
-      services, connections, groups, alerts,
+      services, connections, groups, alerts: alertsForGraph,
       positions: cfg.layout.positions,
       selectedConnectionId: ui.selectedConnectionId,
     }),
-    [services, connections, groups, alerts, cfg.layout.positions, ui.selectedConnectionId],
+    [services, connections, groups, alertsForGraph, cfg.layout.positions, ui.selectedConnectionId],
   );
 
   const [nodes, setNodes] = useState<Node[]>(derived.nodes);
@@ -47,14 +71,29 @@ function ProgramsInner() {
   const draggingIds = useRef<Set<string>>(new Set());
   const lastGroupPos = useRef<Record<string, { x: number; y: number }>>({});
 
-  // Synchronisation données → nœuds, en préservant les positions en cours de glissement
+  /** Synchronisation données → nœuds.
+   *
+   *  Deux choses doivent survivre à chaque reconstruction :
+   *   - la position d'un nœud en cours de glissement, sinon il reviendrait sous
+   *     le curseur à chaque mesure ;
+   *   - les dimensions **mesurées** par React Flow (`measured`). React Flow
+   *     masque (`visibility: hidden`) tout nœud qu'il croit non mesuré : en les
+   *     écrasant à chaque instantané, on rendait le graphe invisible par
+   *     intermittence, et on forçait une remesure complète toutes les deux
+   *     secondes sur un flux temps réel. */
   useEffect(() => {
     setNodes((cur) => {
       const curById = new Map(cur.map((n) => [n.id, n]));
       return derived.nodes.map((d) => {
         const c = curById.get(d.id);
-        if (c && draggingIds.current.has(d.id)) return { ...d, position: c.position };
-        return d;
+        if (!c) return d;
+        return {
+          ...d,
+          position: draggingIds.current.has(d.id) ? c.position : d.position,
+          measured: c.measured,
+          width: c.width ?? d.width,
+          height: c.height ?? d.height,
+        };
       });
     });
   }, [derived.nodes]);
@@ -131,6 +170,20 @@ function ProgramsInner() {
     setTimeout(() => rf.fitView({ padding: 0.15 }), 60);
   }, [services, connections, groups, cfg, rf]);
 
+  // À l'affichage du graphe, on cadre sur le contenu : une disposition
+  // mémorisée sur un écran large laisserait tous les blocs hors champ sur un
+  // écran étroit, donnant une zone vide sans aucune indication.
+  useEffect(() => {
+    if (effectiveView !== 'graph') return;
+    const timer = setTimeout(() => rf.fitView({ padding: 0.15, duration: 0 }), 80);
+    return () => clearTimeout(timer);
+  }, [effectiveView, rf]);
+
+  const detailSheetOpen = useUiStore((s) => s.detailSheetOpen);
+  const hasSelection = Boolean(
+    ui.selectedServiceId ?? ui.selectedConnectionId ?? ui.selectedGroupId,
+  );
+
   // Modales & confirmation de suppression
   const [modal, setModal] = useState<null | 'service' | 'connection' | 'group' | 'hidden'>(null);
   const [confirmDel, setConfirmDel] = useState<null | { kind: 'service' | 'connection'; id: string; label: string }>(null);
@@ -160,8 +213,17 @@ function ProgramsInner() {
 
   return (
     <div className="programs">
-      <GraphToolbar onOpen={setModal} onAutoLayout={doAutoLayout} />
+      <GraphToolbar
+        onOpen={setModal}
+        onAutoLayout={doAutoLayout}
+        view={effectiveView}
+        onViewChange={setViewChoice}
+        graphControlsHidden={effectiveView === 'list'}
+      />
       <div className="programs-body">
+        {effectiveView === 'list' ? (
+          <ServiceListView />
+        ) : (
         <div className="graph-wrap">
           <ReactFlow
             nodes={nodes}
@@ -203,9 +265,30 @@ function ProgramsInner() {
               Aucun service détecté ou visible. Ajustez les filtres ou ajoutez un service manuellement.
             </div>
           )}
+
+          {/* Commandes de zoom et de recentrage atteignables au pouce. Elles
+              doublent les boutons de la barre d'outils, trop petits au doigt et
+              parfois hors de portée en haut de l'écran. */}
+          {isMobile && (
+            <div className="graph-controls">
+              <button type="button" aria-label="Zoom avant" onClick={() => rf.zoomIn()}>＋</button>
+              <button type="button" aria-label="Zoom arrière" onClick={() => rf.zoomOut()}>－</button>
+              <button type="button" aria-label="Ajuster à l’écran" onClick={() => rf.fitView({ padding: 0.15 })}>⤢</button>
+            </div>
+          )}
         </div>
-        <SidePanel />
+        )}
+
+        {/* Poste de travail : panneau latéral permanent.
+            Mobile : feuille ouverte à la sélection, refermable d'un geste. */}
+        {!isMobile && <SidePanel />}
       </div>
+
+      {isMobile && detailSheetOpen && hasSelection && (
+        <Sheet title="Détail" onClose={() => ui.setDetailSheetOpen(false)}>
+          <SidePanel />
+        </Sheet>
+      )}
 
       {modal === 'service' && <ServiceModal onClose={() => setModal(null)} />}
       {modal === 'connection' && <ConnectionModal onClose={() => setModal(null)} />}

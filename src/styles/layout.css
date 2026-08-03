@@ -785,6 +785,9 @@
 .service-list {
   display: grid;
   gap: var(--sp-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
 
 .service-list__item {
@@ -1169,4 +1172,13 @@
 .hw-card--absent {
   border-style: dashed;
   opacity: 0.75;
+}
+
+/* Conteneur de la vue liste : occupe la place du graphe et défile seul. */
+.service-list-wrap {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--sp-3);
+  padding-bottom: calc(var(--sp-6) + var(--sab));
 }

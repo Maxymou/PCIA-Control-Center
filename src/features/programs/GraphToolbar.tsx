@@ -4,9 +4,14 @@ import { useConfigStore } from '../../store/useConfigStore';
 import { SERVICE_STATUS_LABELS, SERVICE_TYPE_LABELS } from '../../utils/labels';
 import { Tooltip } from '../../ui/Tooltip';
 
-export function GraphToolbar({ onOpen, onAutoLayout }: {
+export function GraphToolbar({ onOpen, onAutoLayout, view, onViewChange, graphControlsHidden }: {
   onOpen: (m: 'service' | 'connection' | 'group' | 'hidden') => void;
   onAutoLayout: () => void;
+  /** Présentation courante : graphe interactif ou liste. */
+  view: 'graph' | 'list';
+  onViewChange: (v: 'auto' | 'graph' | 'list') => void;
+  /** Masque les commandes propres au graphe quand la liste est affichée. */
+  graphControlsHidden: boolean;
 }) {
   const rf = useReactFlow();
   const cfg = useConfigStore();
@@ -20,11 +25,32 @@ export function GraphToolbar({ onOpen, onAutoLayout }: {
 
   return (
     <div className="graph-toolbar">
+      {/* Bascule graphe ↔ liste : les deux présentations donnent accès aux
+          mêmes services, aux mêmes connexions et aux mêmes actions. */}
+      <div className="segmented" role="group" aria-label="Présentation">
+        <button
+          type="button"
+          aria-pressed={view === 'graph'}
+          onClick={() => onViewChange('graph')}
+        >
+          <span aria-hidden="true">⬡</span> Graphe
+        </button>
+        <button
+          type="button"
+          aria-pressed={view === 'list'}
+          onClick={() => onViewChange('list')}
+        >
+          <span aria-hidden="true">☰</span> Liste
+        </button>
+      </div>
+      <div className="sep" />
       <div className="group">
         <button className="btn-primary btn-sm" onClick={() => onOpen('service')}>+ Service</button>
         <button className="btn-sm" onClick={() => onOpen('connection')}>+ Connexion</button>
         <button className="btn-sm" onClick={() => onOpen('group')}>+ Groupe</button>
       </div>
+      {!graphControlsHidden && (
+        <>
       <div className="sep" />
       <div className="group">
         <Tooltip content="Réorganise les blocs, flux de gauche à droite">
@@ -60,6 +86,8 @@ export function GraphToolbar({ onOpen, onAutoLayout }: {
         <button className="btn-sm" onClick={cfg.restoreLayout} disabled={!cfg.savedLayout}>Restaurer la disposition</button>
         <button className="btn-sm" onClick={cfg.resetLayout}>Réinitialiser</button>
       </div>
+        </>
+      )}
       <div className="sep" />
       <div className="group" style={{ position: 'relative' }}>
         <button className="btn-sm" onClick={() => onOpen('hidden')}>
