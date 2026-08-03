@@ -155,7 +155,7 @@
   /* ---------- Grilles ----------------------------------------------------- */
   --card-min: 220px;      /* largeur minimale d'une carte de synthèse */
   --panel-w: 340px;       /* panneau latéral de détail (desktop) */
-  --nav-w: 216px;         /* navigation latérale déployée */
+  --nav-w: 240px;         /* navigation latérale déployée */
   --nav-w-compact: 60px;  /* navigation latérale en icônes (tablette) */
   --header-h: 52px;
   --bottom-nav-h: 56px;

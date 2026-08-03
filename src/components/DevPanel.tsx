@@ -9,8 +9,9 @@ import { Confirm } from './Common';
  *  Disponible uniquement quand les données sont simulées (simulation locale ou
  *  back-end en mode démo). En mode matériel, aucun scénario n'est jouable —
  *  l'application n'invente jamais de données sur une vraie machine. */
-export function DevPanel() {
-  const [open, setOpen] = useState(false);
+export function DevPanel({ inline = false }: { inline?: boolean } = {}) {
+  // `inline` : intégré au flux de la section Paramètres plutôt que flottant.
+  const [open, setOpen] = useState(inline);
   const [confirmReset, setConfirmReset] = useState(false);
   const gtx = useLiveStore((s) => s.snap.hardware.find((h) => h.id === 'gtx1080')?.installed);
   const system = useLiveStore((s) => s.snap.system);
@@ -22,12 +23,16 @@ export function DevPanel() {
   const simulated = mode !== 'hardware';
 
   return (
-    <div className="dev-panel card">
-      <div className="head" onClick={() => setOpen((v) => !v)} role="button" tabIndex={0}
-        onKeyDown={(e) => e.key === 'Enter' && setOpen((v) => !v)}>
+    <div className={`dev-panel card${inline ? ' dev-panel--inline' : ''}`}>
+      <button
+        type="button"
+        className="head"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
         <span>🧪 Mode démonstration</span>
-        <span>{open ? '▾' : '▸'}</span>
-      </div>
+        <span aria-hidden="true">{open ? '▾' : '▸'}</span>
+      </button>
       {open && (
         <div className="body">
           {simulated ? (

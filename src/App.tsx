@@ -1,19 +1,40 @@
-import { useEffect } from 'react';
+import { useCallback, useEffect, type ComponentType } from 'react';
 import { Header } from './components/Header';
 import { AlertsPanel } from './components/AlertsPanel';
-import { DevPanel } from './components/DevPanel';
 import { ConflictBanner } from './components/ConflictBanner';
-import { ProgramsTab } from './features/programs/ProgramsTab';
-import { HardwareTab } from './features/hardware/HardwareTab';
+import { AppShell } from './ui/AppShell';
+import { useViewportSync } from './ui/useViewport';
+import type { SectionId } from './ui/sections';
+import { OverviewSection } from './sections/OverviewSection';
+import { HardwareSection } from './sections/HardwareSection';
+import { ServicesSection } from './sections/ServicesSection';
+import { FansSection } from './sections/FansSection';
+import { AlertsSection } from './sections/AlertsSection';
+import { SettingsSection } from './sections/SettingsSection';
 import { useUiStore } from './store/useUiStore';
 import { useConfigStore } from './store/useConfigStore';
-import { useViewportSync } from './ui/useViewport';
+import { useActiveAlerts } from './store/selectors';
 import type { Alert, FanId, HardwareId } from './types';
 
+/** Une section, un composant. L'ajout d'une section se fait ici et dans
+ *  `src/ui/sections.ts`, nulle part ailleurs. */
+const SECTION_VIEWS: Record<SectionId, ComponentType> = {
+  overview: OverviewSection,
+  hardware: HardwareSection,
+  services: ServicesSection,
+  fans: FansSection,
+  alerts: AlertsSection,
+  settings: SettingsSection,
+};
+
 export default function App() {
-  const { tab, setTab, alertsOpen, setAlertsOpen } = useUiStore();
+  const tab = useUiStore((s) => s.tab);
+  const setTab = useUiStore((s) => s.setTab);
+  const alertsOpen = useUiStore((s) => s.alertsOpen);
+  const setAlertsOpen = useUiStore((s) => s.setAlertsOpen);
   const undo = useConfigStore((s) => s.undo);
   const redo = useConfigStore((s) => s.redo);
+  const activeAlerts = useActiveAlerts();
 
   // Seul point de l'application où la hauteur du viewport est calculée.
   useViewportSync();
@@ -32,32 +53,33 @@ export default function App() {
     return () => window.removeEventListener('keydown', h);
   }, [undo, redo]);
 
-  const openAlertTarget = (a: Alert) => {
+  /** Ouvre l'élément visé par une alerte dans la section qui le détaille. */
+  const openAlertTarget = useCallback((a: Alert) => {
     const ui = useUiStore.getState();
     setAlertsOpen(false);
-    if (a.targetKind === 'service') { ui.setTab('programs'); ui.selectService(a.targetId); }
-    else if (a.targetKind === 'connection') { ui.setTab('programs'); ui.selectConnection(a.targetId); }
-    else if (a.targetKind === 'fan') { ui.setTab('hardware'); ui.selectFan(a.targetId as FanId); }
+    if (a.targetKind === 'service') { ui.setTab('services'); ui.selectService(a.targetId); }
+    else if (a.targetKind === 'connection') { ui.setTab('services'); ui.selectConnection(a.targetId); }
+    else if (a.targetKind === 'fan') { ui.setTab('fans'); ui.selectFan(a.targetId as FanId); }
     else { ui.setTab('hardware'); ui.selectHardware(a.targetId as HardwareId); }
-  };
+  }, [setAlertsOpen]);
+
+  const SectionView = SECTION_VIEWS[tab];
 
   return (
-    <div className="app-viewport">
-      <Header onOpenAlerts={() => setAlertsOpen(true)} />
-      <nav className="tabs" aria-label="Navigation principale">
-        <button className={tab === 'programs' ? 'active' : ''} onClick={() => setTab('programs')}>
-          Programmes
-        </button>
-        <button className={tab === 'hardware' ? 'active' : ''} onClick={() => setTab('hardware')}>
-          Hardware &amp; Ventilation
-        </button>
-      </nav>
-      <main className="tab-content">
-        {tab === 'programs' ? <ProgramsTab /> : <HardwareTab />}
-      </main>
-      {alertsOpen && <AlertsPanel onClose={() => setAlertsOpen(false)} onOpenTarget={openAlertTarget} />}
+    <>
+      <AppShell
+        header={<Header onOpenAlerts={() => setAlertsOpen(true)} />}
+        current={tab}
+        onSelect={setTab}
+        alertCount={activeAlerts.length}
+      >
+        <SectionView />
+      </AppShell>
+
+      {alertsOpen && (
+        <AlertsPanel onClose={() => setAlertsOpen(false)} onOpenTarget={openAlertTarget} />
+      )}
       <ConflictBanner />
-      <DevPanel />
-    </div>
+    </>
   );
 }

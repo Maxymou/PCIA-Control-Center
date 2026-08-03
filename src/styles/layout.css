@@ -77,12 +77,19 @@
   font-weight: var(--fw-bold);
 }
 
-.header .brand h1 {
+.header .brand__name {
+  margin: 0;
   font-size: var(--fs-md);
   font-weight: var(--fw-semibold);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Sous 480 px, seul le monogramme reste : la barre d'en-tête doit laisser la
+ * place à l'état de connexion et au bouton d'alertes, plus utiles. */
+@media (max-width: 479px) {
+  .header .brand__name { display: none; }
 }
 
 .header .stat {
@@ -113,13 +120,26 @@
   gap: var(--sp-2);
 }
 
-/* Sous 1100px les indicateurs secondaires de l'en-tête disparaissent : ils sont
- * repris, sans perte d'information, par la Vue d'ensemble et la barre d'état. */
+/* Sous 1100 px, les indicateurs secondaires de l'en-tête disparaissent : ils
+ * sont repris sans perte par la Vue d'ensemble et la section Alertes. L'état de
+ * connexion et le bouton d'alertes, eux, restent visibles partout. */
 @media (max-width: 1099px) {
   .header .stat--secondary,
   .header .sep {
     display: none;
   }
+}
+
+/* Très petits écrans : la pastille de connexion se réduit à sa pastille d'état
+ * et à son mode, le bouton d'alertes à son icône. Les noms accessibles restent
+ * complets (aria-label), rien n'est perdu pour un lecteur d'écran. */
+@media (max-width: 599px) {
+  .header .backend-pill__text { display: none; }
+  .header__alerts-label { display: none; }
+}
+
+@media (max-width: 379px) {
+  .header .backend-pill__mode { display: none; }
 }
 
 .backend-pill {
@@ -403,6 +423,12 @@
     padding-bottom: var(--sp-6);
     gap: var(--sp-3);
   }
+
+  /* Deux cartes de synthèse par ligne plutôt qu'une : sur un écran de 390 px,
+   * une carte par ligne obligeait à faire défiler pour lire six chiffres. */
+  .section {
+    --card-min: 148px;
+  }
 }
 
 /* Grille de cartes : s'adapte à la largeur réelle, sans nombre de colonnes figé.
@@ -463,6 +489,41 @@
 .stat-card .big--text {
   font-family: var(--font);
   font-size: var(--fs-lg);
+}
+
+/* Carte-lien : c'est un vrai bouton, il ne doit pas ressembler à un contrôle
+ * de formulaire mais rester manifestement actionnable. */
+.stat-card--link {
+  display: block;
+  width: 100%;
+  min-height: 0;
+  text-align: left;
+  font-weight: inherit;
+  font-size: inherit;
+  cursor: pointer;
+}
+
+.stat-card--link:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+
+/* ---------- Ventilation ----------
+ * Poste de travail : liste des sorties à gauche, réglages à droite.
+ * Mobile : la liste passe au-dessus, la sortie sélectionnée reste visible et
+ * ses réglages suivent immédiatement — aucune navigation supplémentaire. */
+.fans-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+@media (max-width: 1023px) {
+  .fans-layout {
+    grid-template-columns: 1fr;
+    gap: var(--sp-3);
+  }
 }
 
 /* ===========================================================================
