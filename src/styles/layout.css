@@ -1182,3 +1182,35 @@
   padding: var(--sp-3);
   padding-bottom: calc(var(--sp-6) + var(--sab));
 }
+
+/* ---------- Assistant de calibration ---------- */
+.calib-steps {
+  list-style: none;
+  margin: var(--sp-4) 0 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-2);
+  counter-reset: none;
+}
+
+.calib-step {
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+/* Une étape atteinte se distingue par sa bordure ET par son badge « Atteinte » :
+ * la couleur seule ne porte pas l'information. */
+.calib-step--done {
+  border-left-color: var(--ok);
+}
+
+.calib-step h4 {
+  font-size: var(--fs-base);
+}
+
+.calib-step .progress {
+  margin: var(--sp-2) 0;
+}

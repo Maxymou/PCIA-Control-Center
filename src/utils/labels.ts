@@ -1,6 +1,7 @@
 import type {
-  ConnectionStatus, ConnectionType, ConnectionOrigin,
-  ServiceStatus, ServiceType, Severity, FanMode, EventCategory,
+  BiosReturnResult, CalibrationState, CalibrationStep, ConnectionStatus,
+  ConnectionType, ConnectionOrigin, EventCategory, FanControlState, FanMode,
+  RpmValidationResult, ServiceStatus, ServiceType, Severity,
 } from '../types';
 
 export const SERVICE_STATUS_LABELS: Record<ServiceStatus, string> = {
@@ -73,4 +74,95 @@ export const EVENT_CATEGORY_LABELS: Record<EventCategory, string> = {
   temperature: 'Température', fan: 'Ventilation', service: 'Service',
   connection: 'Connexion', hardware: 'Matériel', profile: 'Profil',
   curve: 'Courbe', alert: 'Alerte', config: 'Configuration',
+};
+
+// ---------- États de contrôle et de calibration ----------
+// Ces états viennent du moteur de ventilation. Ils ne sont pas cosmétiques :
+// ils disent qui pilote réellement chaque sortie à cet instant.
+
+export const FAN_CONTROL_STATE_LABELS: Record<FanControlState, string> = {
+  BIOS_CONTROLLED: 'Contrôlée par le BIOS',
+  SOFTWARE_STARTING: 'Prise de contrôle logiciel…',
+  SOFTWARE_CONTROLLED: 'Pilotée par le logiciel',
+  FAILSAFE: 'Sécurité active',
+  RETURNING_TO_BIOS: 'Restitution au BIOS…',
+  UNSUPPORTED: 'Non pilotable',
+  ERROR: 'En erreur',
+};
+
+export const FAN_CONTROL_STATE_SEVERITY: Record<FanControlState, Severity> = {
+  BIOS_CONTROLLED: 'unknown',
+  SOFTWARE_STARTING: 'normal',
+  SOFTWARE_CONTROLLED: 'normal',
+  FAILSAFE: 'critical',
+  RETURNING_TO_BIOS: 'warning',
+  UNSUPPORTED: 'unknown',
+  ERROR: 'critical',
+};
+
+/** Explication de ce que l'état implique concrètement pour l'utilisateur. */
+export const FAN_CONTROL_STATE_HELP: Record<FanControlState, string> = {
+  BIOS_CONTROLLED:
+    'La carte mère régule cette sortie. Le logiciel ne lui écrit aucune consigne : c’est l’état de repos et l’état de sécurité.',
+  SOFTWARE_STARTING:
+    'Le moteur prend la main sur cette sortie ; la régulation logicielle démarre.',
+  SOFTWARE_CONTROLLED:
+    'Le moteur de ventilation applique la courbe. Le BIOS ne régule plus cette sortie.',
+  FAILSAFE:
+    'Les écritures ont échoué de façon répétée. Le moteur applique une consigne de sécurité et tente de rendre la main au BIOS.',
+  RETURNING_TO_BIOS:
+    'Le moteur rend la main à la carte mère et vérifie que la restitution a bien eu lieu.',
+  UNSUPPORTED:
+    'Le contrôleur n’expose pas de commande utilisable pour cette sortie.',
+  ERROR:
+    'Une erreur empêche le pilotage de cette sortie. Voir le détail de la dernière erreur d’écriture.',
+};
+
+export const CALIBRATION_STATE_LABELS: Record<CalibrationState, string> = {
+  NOT_CALIBRATED: 'Non calibrée',
+  DETECTED: 'Détectée',
+  IDENTIFIED: 'Ventilateur identifié',
+  RPM_CONFIRMED: 'Retour RPM confirmé',
+  SOFTWARE_CONTROL_VALIDATED: 'Contrôle logiciel validé',
+  BIOS_RETURN_VALIDATED: 'Retour BIOS validé',
+  AUTHORIZED: 'Autorisée',
+  RESTRICTED: 'Restreinte',
+  FAILED: 'Échec de calibration',
+};
+
+export const CALIBRATION_STATE_SEVERITY: Record<CalibrationState, Severity> = {
+  NOT_CALIBRATED: 'unknown',
+  DETECTED: 'unknown',
+  IDENTIFIED: 'warning',
+  RPM_CONFIRMED: 'warning',
+  SOFTWARE_CONTROL_VALIDATED: 'warning',
+  BIOS_RETURN_VALIDATED: 'warning',
+  AUTHORIZED: 'normal',
+  RESTRICTED: 'warning',
+  FAILED: 'critical',
+};
+
+export const RPM_VALIDATION_LABELS: Record<RpmValidationResult, string> = {
+  CONFIRMED: 'Confirmé',
+  PROBABLE: 'Probable',
+  NOT_AVAILABLE: 'Aucun tachymètre',
+  INCONSISTENT: 'Incohérent',
+  FAILED: 'Échec',
+};
+
+export const BIOS_RETURN_LABELS: Record<BiosReturnResult, string> = {
+  CONFIRMED: 'Confirmé',
+  PROBABLE: 'Probable',
+  NOT_CONFIRMED: 'Non confirmé',
+  IMPOSSIBLE: 'Impossible',
+  UNKNOWN: 'Inconnu',
+};
+
+export const CALIBRATION_STEP_LABELS: Record<CalibrationStep, string> = {
+  idle: 'En attente',
+  identify: 'Identification physique',
+  'test-rpm': 'Validation du retour RPM',
+  'detect-minimum': 'Détection du minimum',
+  'test-software-control': 'Validation du contrôle logiciel',
+  'test-bios-return': 'Test de retour BIOS',
 };
