@@ -10,6 +10,7 @@ import '@xyflow/react/dist/style.css';
 import { bootLiveData } from './store/useLiveStore';
 import { bootConfig } from './store/useConfigStore';
 import { initDataService, providerInfo } from './services/dataService';
+import { registerServiceWorker } from './pwa/register';
 
 const root = ReactDOM.createRoot(document.getElementById('root')!);
 
@@ -50,6 +51,10 @@ async function boot() {
       <App />
     </React.StrictMode>,
   );
+
+  // Enregistré après le premier rendu : la supervision passe avant la PWA, et
+  // un échec d'enregistrement ne doit jamais empêcher l'interface de démarrer.
+  registerServiceWorker();
 }
 
 void boot().catch((err) => {

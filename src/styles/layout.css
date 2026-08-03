@@ -1214,3 +1214,23 @@
 .calib-step .progress {
   margin: var(--sp-2) 0;
 }
+
+/* Bandeau de mise à jour : ancré en bas, au-dessus de la navigation basse et de
+ * la zone de l'indicateur d'accueil, jamais par-dessus une modale. */
+.update-banner {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--sp-3) + var(--sab) + var(--bottom-nav-h));
+  transform: translateX(-50%);
+  z-index: var(--z-banner);
+  width: min(560px, calc(100vw - 2 * var(--sp-3)));
+  box-shadow: var(--shadow-panel);
+  background: var(--bg-raised);
+  flex-wrap: wrap;
+}
+
+@media (min-width: 768px) {
+  .update-banner {
+    bottom: calc(var(--sp-4) + var(--sab));
+  }
+}

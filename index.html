@@ -37,6 +37,13 @@
     <!-- Interface de supervision d'un réseau local : rien à indexer. -->
     <meta name="robots" content="noindex, nofollow" />
 
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icons/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png" />
+    <!-- iOS ignore le manifest pour l'icône d'écran d'accueil : elle doit être
+         déclarée ici, en PNG opaque. -->
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon-180.png" />
+
     <!-- Fond posé avant toute feuille de style et tout script : supprime le
          flash blanc au démarrage à froid de la PWA installée. -->
     <style>

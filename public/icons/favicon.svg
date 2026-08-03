@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="PCIA Control Center">
+  <!-- Même marque que les icônes PNG (scripts/generate-icons.mjs) : plaque
+       dégradée et rotor à cinq pales. -->
+  <defs>
+    <linearGradient id="p" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2b5c99"/>
+      <stop offset="1" stop-color="#4d9dff"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#p)"/>
+  <g fill="#08101a">
+    <path d="M32 12c6 2 9 7 8 13-3-3-7-4-11-3 1-4 2-7 3-10z" transform="rotate(0 32 32)"/>
+    <path d="M32 12c6 2 9 7 8 13-3-3-7-4-11-3 1-4 2-7 3-10z" transform="rotate(72 32 32)"/>
+    <path d="M32 12c6 2 9 7 8 13-3-3-7-4-11-3 1-4 2-7 3-10z" transform="rotate(144 32 32)"/>
+    <path d="M32 12c6 2 9 7 8 13-3-3-7-4-11-3 1-4 2-7 3-10z" transform="rotate(216 32 32)"/>
+    <path d="M32 12c6 2 9 7 8 13-3-3-7-4-11-3 1-4 2-7 3-10z" transform="rotate(288 32 32)"/>
+    <circle cx="32" cy="32" r="6"/>
+  </g>
+  <circle cx="32" cy="32" r="3" fill="#4d9dff"/>
+</svg>

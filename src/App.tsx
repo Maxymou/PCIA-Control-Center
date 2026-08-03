@@ -3,6 +3,7 @@ import { Header } from './components/Header';
 import { AlertsPanel } from './components/AlertsPanel';
 import { ConflictBanner } from './components/ConflictBanner';
 import { AppShell } from './ui/AppShell';
+import { UpdateBanner } from './ui/UpdateBanner';
 import { useViewportSync } from './ui/useViewport';
 import type { SectionId } from './ui/sections';
 import { OverviewSection } from './sections/OverviewSection';
@@ -80,6 +81,7 @@ export default function App() {
         <AlertsPanel onClose={() => setAlertsOpen(false)} onOpenTarget={openAlertTarget} />
       )}
       <ConflictBanner />
+      <UpdateBanner />
     </>
   );
 }
