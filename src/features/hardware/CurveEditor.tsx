@@ -136,6 +136,29 @@ export function CurveEditor({ curve, currentTemp, currentRpm, onChange, onCommit
     onCommit(c);
   };
 
+  /** Saisie en cours dans les champs numériques.
+   *
+   *  Sans ce brouillon, la contrainte s'appliquerait à chaque frappe : taper
+   *  « 70 » dans un champ affichant 60 donnerait d'abord 7 — aussitôt ramené au
+   *  minimum autorisé — puis 310, ramené au maximum. Le champ combattrait
+   *  l'utilisateur au lieu de le laisser saisir. La valeur n'est donc contrainte
+   *  et appliquée qu'à la validation : perte de focus ou touche Entrée. */
+  const [draft, setDraft] = useState<{ field: 'temp' | 'pwm'; value: string } | null>(null);
+
+  const fieldValue = (field: 'temp' | 'pwm'): string => {
+    if (draft?.field === field) return draft.value;
+    if (selIdx === null || !curve[selIdx]) return '';
+    return String(curve[selIdx][field]);
+  };
+
+  const commitDraft = () => {
+    if (!draft) return;
+    const value = Number(draft.value);
+    setDraft(null);
+    if (draft.value.trim() === '' || Number.isNaN(value)) return;
+    editSelected(draft.field, value);
+  };
+
   /** Déplacement au clavier du point focalisé. */
   const onPointKeyDown = (index: number) => (e: React.KeyboardEvent) => {
     if (disabled) return;
@@ -266,7 +289,10 @@ export function CurveEditor({ curve, currentTemp, currentRpm, onChange, onCommit
           Point
           <select
             value={selIdx ?? ''}
-            onChange={(e) => setSelIdx(e.target.value === '' ? null : Number(e.target.value))}
+            onChange={(e) => {
+              setDraft(null);
+              setSelIdx(e.target.value === '' ? null : Number(e.target.value));
+            }}
           >
             <option value="">Aucun</option>
             {curve.map((p, i) => (
@@ -281,8 +307,10 @@ export function CurveEditor({ curve, currentTemp, currentRpm, onChange, onCommit
             type="number" className="mono" inputMode="numeric"
             min={TEMP_MIN} max={TEMP_MAX}
             disabled={disabled || selIdx === null}
-            value={selIdx !== null && curve[selIdx] ? curve[selIdx].temp : ''}
-            onChange={(e) => editSelected('temp', Number(e.target.value))}
+            value={fieldValue('temp')}
+            onChange={(e) => setDraft({ field: 'temp', value: e.target.value })}
+            onBlur={commitDraft}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitDraft(); } }}
           />
         </label>
 
@@ -292,8 +320,10 @@ export function CurveEditor({ curve, currentTemp, currentRpm, onChange, onCommit
             type="number" className="mono" inputMode="numeric"
             min={0} max={100}
             disabled={disabled || selIdx === null}
-            value={selIdx !== null && curve[selIdx] ? curve[selIdx].pwm : ''}
-            onChange={(e) => editSelected('pwm', Number(e.target.value))}
+            value={fieldValue('pwm')}
+            onChange={(e) => setDraft({ field: 'pwm', value: e.target.value })}
+            onBlur={commitDraft}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitDraft(); } }}
           />
         </label>
 
