@@ -13,14 +13,11 @@
 /* ===========================================================================
  * Ossature
  * ========================================================================*/
-.app {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-}
-
-/* Corps : navigation latérale + contenu (desktop/tablette), ou contenu seul
+/* L'ossature n'a pas de classe propre : c'est `.app-viewport` (base.css) qui
+ * porte la hauteur, calculée par src/ui/viewport.ts. Aucune autre règle de ce
+ * fichier n'utilise 100vh, 100dvh ou `position: fixed; inset: 0`.
+ *
+ * Corps : navigation latérale + contenu (desktop/tablette), ou contenu seul
  * surmonté d'une navigation basse (mobile). */
 .app-body {
   display: flex;

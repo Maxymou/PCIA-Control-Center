@@ -7,12 +7,16 @@ import { ProgramsTab } from './features/programs/ProgramsTab';
 import { HardwareTab } from './features/hardware/HardwareTab';
 import { useUiStore } from './store/useUiStore';
 import { useConfigStore } from './store/useConfigStore';
+import { useViewportSync } from './ui/useViewport';
 import type { Alert, FanId, HardwareId } from './types';
 
 export default function App() {
   const { tab, setTab, alertsOpen, setAlertsOpen } = useUiStore();
   const undo = useConfigStore((s) => s.undo);
   const redo = useConfigStore((s) => s.redo);
+
+  // Seul point de l'application où la hauteur du viewport est calculée.
+  useViewportSync();
 
   // Raccourcis globaux : Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z
   useEffect(() => {
@@ -38,7 +42,7 @@ export default function App() {
   };
 
   return (
-    <div className="app">
+    <div className="app-viewport">
       <Header onOpenAlerts={() => setAlertsOpen(true)} />
       <nav className="tabs" aria-label="Navigation principale">
         <button className={tab === 'programs' ? 'active' : ''} onClick={() => setTab('programs')}>
