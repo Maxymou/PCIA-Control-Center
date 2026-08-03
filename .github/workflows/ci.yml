@@ -1,0 +1,100 @@
+# Intégration continue — PCIA Control Center
+#
+# Rejoue la campagne de non-régression documentée dans docs/BASELINE.md :
+# installation exacte, typecheck, tests, compilation, puis simulation du script
+# d'installation. Sur un projet qui régule le refroidissement de cartes
+# passives, aucune modification ne doit pouvoir être fusionnée sans que ces
+# quatre commandes aient été rejouées.
+#
+# Ce que ce workflow ne fait pas, volontairement :
+#  - aucun contrôle navigateur (captures responsive, audit axe-core,
+#    comportement du service worker) : les automatiser demanderait Playwright et
+#    Chromium, dépendances lourdes que le projet n'a pas. Ils restent une
+#    vérification manuelle, décrite dans docs/RESPONSIVE.md ;
+#  - aucune étape de lint : le projet n'expose pas de script `lint`.
+
+name: CI
+
+on:
+  # Une branche de travail avec PR ouverte est vérifiée une seule fois, pas deux.
+  push:
+    branches: [main]
+  pull_request:
+
+# Le job ne pousse rien, ne commente rien : aucun jeton élargi n'est nécessaire.
+permissions:
+  contents: read
+
+# Un nouveau push annule le run précédent de la même référence : la suite
+# serveur dure environ quatre minutes, accumuler des runs obsolètes n'apporte
+# rien.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Vérification complète
+    # L'application cible Ubuntu Server : la vérifier ailleurs n'aurait pas de sens.
+    runs-on: ubuntu-latest
+    # La suite complète prend environ cinq minutes ; la marge couvre un runner
+    # lent sans laisser un blocage tourner une heure.
+    timeout-minutes: 20
+
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v4
+
+      - name: Installer Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          # Version exigée par le champ `engines` du package.json (>=22) et par
+          # le script d'installation, qui refuse de continuer en dessous.
+          node-version: 22
+          # Évite de recompiler better-sqlite3 à chaque exécution.
+          cache: npm
+
+      - name: Installer les dépendances
+        run: npm ci
+
+      - name: Vérifier les types
+        # tsc -b (front-end) puis tsc -p server/tsconfig.json --noEmit. Couvre
+        # notamment la garde de conformité entre le moteur de ventilation et le
+        # type CalibrationSession partagé avec l'interface.
+        run: npm run typecheck
+
+      - name: Exécuter les tests
+        # 347 tests : 212 côté serveur (environnement Node, un seul processus,
+        # sans parallélisme — imposé par vitest.config.ts) et 135 côté interface
+        # (jsdom). Aucun n'accède au matériel réel.
+        run: npm test
+
+      - name: Compiler
+        run: npm run build
+
+      - name: Contrôler les artefacts produits
+        # Le service worker et le manifest sont générés à la compilation par un
+        # plugin Vite local : leur disparition ne casserait ni le build ni les
+        # tests, et passerait donc autrement inaperçue.
+        run: |
+          set -euo pipefail
+          for artefact in \
+            dist/index.html \
+            dist/sw.js \
+            dist/manifest.webmanifest \
+            dist/icons/icon-512.png \
+            dist-server/server/src/index.js \
+            dist-server/server/src/fand.js
+          do
+            if [ ! -f "$artefact" ]; then
+              echo "::error::Artefact manquant après compilation : $artefact"
+              exit 1
+            fi
+            echo "  ✓ $artefact"
+          done
+
+      - name: Simuler l'installation
+        # --dry-run n'écrit rien, ne compile rien, ne démarre rien et n'exige
+        # pas les droits root (packaging/install.sh le prévoit explicitement) :
+        # aucun sudo ici, pour que la perte de ce comportement soit détectée.
+        run: bash packaging/install.sh --dry-run --prefix /tmp/pcia-ci
