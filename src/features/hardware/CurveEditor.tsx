@@ -202,7 +202,10 @@ export function CurveEditor({ curve, currentTemp, currentRpm, onChange, onCommit
       <svg
         ref={svgRef}
         viewBox={`0 0 ${W} ${H}`}
-        role="img"
+        // `role="group"` et non `role="img"` : les points sont focalisables, et
+        // une image ne peut pas contenir de contrôles. Le résumé textuel affiché
+        // sous le graphique tient lieu d'alternative.
+        role="group"
         aria-label={`Courbe de ventilation : ${summary}. Fonctionnement actuel : ${currentTemp.toFixed(1)} degrés, ${Math.round(curPwm)} pour cent.`}
         onDoubleClick={addPoint}
       >

@@ -50,7 +50,9 @@ function lastCommit(spy: ReturnType<typeof vi.fn>): FanCurve {
 describe('description accessible', () => {
   it('énonce la courbe entière, sans obliger à interpréter le graphique', () => {
     render(<Host />);
-    const chart = screen.getByRole('img');
+    // `group` et non `img` : le graphique contient des points focalisables, et
+    // une image ne peut pas avoir de descendants interactifs.
+    const chart = screen.getByRole('group', { name: /Courbe de ventilation/ });
     expect(chart).toHaveAccessibleName(/30 °C → 20 %/);
     expect(chart).toHaveAccessibleName(/60 °C → 50 %/);
     expect(chart).toHaveAccessibleName(/85 °C → 100 %/);

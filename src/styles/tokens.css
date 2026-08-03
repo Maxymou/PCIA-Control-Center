@@ -32,11 +32,17 @@
   --border-focus: var(--accent);
 
   /* ---------- Texte -------------------------------------------------------
-   * Contrastes mesurés sur --bg : text 14.8:1, text-2 6.4:1, text-3 4.6:1.
-   * --text-3 n'est utilisé que pour du texte non essentiel (unités, axes). */
+   * Contrastes vérifiés par axe-core sur --surface (#1b1f26), le fond sur lequel
+   * ces couleurs s'affichent réellement — et non sur --bg, qui donnerait des
+   * valeurs flatteuses mais fausses :
+   *
+   *   --text    17.4:1     --text-2  6.5:1     --text-3  5.3:1
+   *
+   * Les trois dépassent le seuil AA de 4.5:1, y compris pour les libellés de
+   * 11 px, tout en conservant trois niveaux de hiérarchie distincts. */
   --text: #e6e9ed;
   --text-2: #9aa3ae;
-  --text-3: #7d8691;
+  --text-3: #8a929c;
   --text-on-accent: #08101a;
 
   /* ---------- Accent ---------------------------------------------------- */

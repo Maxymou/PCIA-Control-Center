@@ -93,7 +93,11 @@ export function HardwareSchema() {
   return (
     <div className="hw-schema card card-pad">
       <p className="card-title">Schéma matériel</p>
-      <svg viewBox="0 0 520 375" role="img" aria-label="Schéma des associations matériel et ventilation">
+      {/* `role="group"` et non `role="img"` : ce schéma contient des zones
+          focalisables, et une image ne peut pas avoir de descendants
+          interactifs. La description textuelle dépliable, juste dessous, tient
+          lieu d'alternative au dessin. */}
+      <svg viewBox="0 0 520 375" role="group" aria-label="Schéma des associations matériel et ventilation">
         {/* Contour boîtier */}
         <rect x="6" y="8" width="508" height="360" rx="12" fill="none" stroke="var(--border)" strokeWidth="1.2" strokeDasharray="5 4" />
         <text x="18" y="28" fontSize="10" fill="var(--text-3)" letterSpacing="1.5">BOÎTIER</text>
