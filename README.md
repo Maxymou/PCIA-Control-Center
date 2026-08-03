@@ -4,6 +4,10 @@ Supervision et pilotage d'un PC dédié à l'IA sous Ubuntu : matériel, service
 connexions sous forme de graphe interactif, ventilation avec courbes éditables,
 profils, alertes et historiques.
 
+L'interface est **responsive et installable en PWA** : utilisable au poste de
+travail comme au doigt sur tablette, téléphone Android ou iPhone depuis l'écran
+d'accueil.
+
 L'application se compose d'une interface web (React) et d'un back-end en deux
 processus : un serveur d'application et un **moteur de ventilation autonome**.
 
@@ -18,6 +22,8 @@ ws://IP_PCIA:4321/ws/live     flux temps réel
 ## Sommaire
 
 - [Architecture](#architecture)
+- [Interface](#interface)
+- [Installation en application (PWA)](#installation-en-application-pwa)
 - [Prérequis](#prérequis)
 - [Installation](#installation)
 - [Modes d'exécution](#modes-dexécution)
@@ -29,6 +35,7 @@ ws://IP_PCIA:4321/ws/live     flux temps réel
 - [Outil en ligne de commande](#outil-en-ligne-de-commande)
 - [Développement](#développement)
 - [Tests](#tests)
+- [Documentation technique](#documentation-technique)
 - [Limites connues](#limites-connues)
 - [Dépannage](#dépannage)
 - [Désinstallation](#désinstallation)
@@ -70,7 +77,7 @@ processus écrit les sorties PWM à un instant donné.
 ### Arborescence
 
 ```
-src/                    front-end React (inchangé fonctionnellement)
+src/                    front-end React
 ├── types/              modèles de données — contrat partagé avec le back-end
 ├── services/           ★ couche de données
 │   ├── dataService.ts    proxy : choisit la source au démarrage
@@ -79,7 +86,19 @@ src/                    front-end React (inchangé fonctionnellement)
 │   └── apiClient.ts      client HTTP + WebSocket avec reconnexion
 ├── mocks/              moteur de simulation navigateur (mode hors ligne)
 ├── store/              Zustand : données live, configuration, état UI
-├── features/           graphe des programmes, matériel et ventilation
+├── styles/             design system : jetons, socle, composants, mise en page
+├── ui/                 ★ primitives d'interface
+│   ├── viewport.ts       hauteurs --app-height / --vvh (gestion iOS)
+│   ├── useBreakpoint.ts  points de rupture et nature du pointeur
+│   ├── AppShell.tsx      ossature et navigations
+│   ├── Modal.tsx         modale et feuille mobile (piège de focus)
+│   ├── Tooltip.tsx       infobulle accessible, recadrée dans la fenêtre
+│   ├── ConfirmDialog.tsx confirmation énonçant action, cible et conséquences
+│   ├── Measure.tsx       affichage d'une mesure avec sa provenance
+│   └── useConnectionState.ts  décide seul si les commandes sont autorisées
+├── sections/           les six sections de l'application
+├── pwa/                service worker et enregistrement
+├── features/           graphe des services, matériel et ventilation
 └── components/         en-tête, alertes, panneau de démonstration
 
 server/src/
@@ -98,9 +117,126 @@ server/src/
 ├── http/               serveur Fastify, routes, WebSocket, contrôle d'accès
 └── demo/               monde simulé du mode démonstration
 
-server/test/            212 tests (aucun n'accède au matériel réel)
+server/test/            212 tests serveur (aucun n'accède au matériel réel)
+src/**/*.test.tsx       135 tests d'interface (jsdom)
+public/                 manifest, icônes, page hors ligne
+scripts/                génération des icônes PNG (sans dépendance)
+docs/                   documentation technique
 packaging/              unités systemd, règle udev, scripts d'installation
 ```
+
+---
+
+## Interface
+
+Six sections, accessibles par une navigation latérale sur ordinateur et par une
+barre basse sur téléphone :
+
+| Section | Contenu |
+|---|---|
+| **Vue d'ensemble** | état global, mode d'exécution, CPU, GPU le plus chaud, puissance GPU, stockage, profil actif, alertes, état des cinq sorties, points d'attention |
+| **Matériel** | inventaire complet des composants, schéma des attributions, historique des températures |
+| **Services et connexions** | graphe interactif, vue liste, ajout manuel, corrections, groupes, masquage |
+| **Ventilation** | profils, sorties, état de sécurité, courbes éditables, assistant de calibration, historique |
+| **Alertes et événements** | alertes actives et historiques, journal filtrable |
+| **Paramètres** | préférences d'affichage, source des données, capacités détectées, disposition, mode démonstration |
+
+### Adaptation à l'écran
+
+| Largeur | Comportement |
+|---|---|
+| ≥ 1280 px | navigation latérale déployée, vue dense, panneaux de détail permanents |
+| 768–1279 px | navigation réduite aux icônes, deux colonnes |
+| < 768 px | barre de navigation basse, une colonne, panneaux en feuilles mobiles |
+
+Certaines fonctions ont une **présentation mobile distincte**, jamais une
+version amputée : le graphe des services devient une liste triée par gravité
+(la bascule vers le graphe reste disponible), le tableau de ventilation devient
+une carte par sortie sans perdre une colonne, et les points de courbe se règlent
+au champ numérique en plus du glissement.
+
+Sur écran tactile, toutes les commandes passent automatiquement à 44 × 44 px,
+quelle que soit la taille de l'écran.
+
+### Provenance des données
+
+Une valeur **simulée** — mode démonstration ou simulation navigateur — est
+soulignée en pointillés et annoncée comme telle. Une valeur absente indique sa
+cause : « indisponible », « aucun capteur » ou « erreur de lecture ». Une valeur
+inconnue n'est jamais présentée comme une mesure réelle.
+
+### Accessibilité
+
+Conforme WCAG 2.2 niveau AA, vérifié par audit axe-core sur chaque section, en
+ordinateur et en mobile, ainsi qu'avec les superpositions ouvertes : navigation
+clavier complète, focus visible, piège de focus dans les modales, contrastes
+mesurés sur le fond réel des cartes, état jamais porté par la seule couleur,
+alternative textuelle pour le schéma matériel et les courbes, et respect de
+`prefers-reduced-motion`.
+
+Le zoom d'accessibilité n'est **pas** bloqué : voir
+[docs/PWA.md](docs/PWA.md#meta-viewport--compromis-assumé) pour le compromis
+retenu.
+
+---
+
+## Installation en application (PWA)
+
+> **Prérequis : un contexte sécurisé.** Les navigateurs n'enregistrent un
+> service worker — et ne proposent l'installation — que sur `localhost`,
+> `127.0.0.1` ou **HTTPS**. Sur une adresse IP locale en HTTP simple, cas
+> habituel de `http://IP_PCIA:4321`, l'application reste pleinement
+> fonctionnelle mais **n'est ni installable ni disponible hors ligne**. Pour en
+> bénéficier sur le réseau local, placer un reverse proxy TLS devant le
+> port 4321.
+
+### Ordinateur — Chrome, Edge
+
+Icône d'installation dans la barre d'adresse, ou menu ⋮ → « Installer PCIA
+Control Center ».
+
+### Android — Chrome
+
+Menu ⋮ → « Ajouter à l'écran d'accueil ». Les icônes *maskable* respectent la
+zone sûre : le système peut les rogner en cercle ou en goutte sans amputer la
+marque.
+
+### iPhone — Safari
+
+Safari uniquement, les autres navigateurs iOS ne permettent pas l'installation.
+Bouton Partager → « Sur l'écran d'accueil ».
+
+L'application s'ouvre alors sans barre d'adresse, avec sa propre icône, en
+respectant les encoches et la zone de l'indicateur d'accueil.
+
+### Fonctionnement hors connexion
+
+Cette application pilote un refroidissement réel : le mode hors ligne est
+volontairement **minimal**.
+
+Ce qui fonctionne : l'interface démarre depuis le cache et affiche
+immédiatement son état de liaison.
+
+Ce qui ne fonctionne pas, délibérément :
+
+- **aucune mesure n'est affichée** — sans serveur, il n'y a rien à superviser,
+  et montrer des valeurs mémorisées serait trompeur ;
+- **les commandes matérielles sont désactivées**, avec le motif affiché ;
+- **aucune commande n'est mise en file d'attente**, aucune n'est rejouée au
+  retour du réseau. Une action refusée doit être réémise volontairement.
+
+Les données du serveur ne sont **jamais** mises en cache : une requête `/api/`
+échoue franchement plutôt que de renvoyer une valeur périmée.
+
+Les commandes sont également désactivées **en ligne** dès que plus aucune mesure
+n'est reçue depuis 15 secondes — le cas où la liaison se croit ouverte mais ne
+transmet plus rien.
+
+### Mises à jour
+
+Une nouvelle version n'est jamais appliquée d'office : un bandeau propose le
+rechargement. Recharger l'interface n'a aucun effet sur la ventilation, qui est
+pilotée par un processus serveur indépendant.
 
 ---
 
@@ -671,6 +807,25 @@ VITE_PCIA_PROVIDER=mock npm run dev      # simulation locale imposée
 VITE_PCIA_API=http://192.168.1.50:4321 npm run dev   # back-end distant
 ```
 
+Le service worker n'est **pas** enregistré en développement : il masquerait le
+rechargement à chaud. Pour l'éprouver, compiler puis servir avec le back-end :
+
+```bash
+npm run build
+PCIA_MODE=demo PCIA_DB=./tmp.db PCIA_RUNTIME_DIR=./run npm run server
+```
+
+### Régénérer les icônes
+
+```bash
+node scripts/generate-icons.mjs
+```
+
+Rastérisation et encodage PNG en JavaScript pur : ni `sharp`, ni ImageMagick, ni
+librsvg ne sont requis — le projet doit se construire sur un Ubuntu Server sans
+environnement graphique. Les icônes produites sont commitées, la compilation du
+front-end n'en dépend pas.
+
 ### Brancher une autre source de données
 
 Tout passe par l'interface `DataService` (`src/services/types.ts`). Une
@@ -682,14 +837,43 @@ seul composant.
 ## Tests
 
 ```bash
-npm test
+npm test                         # les deux suites
+npx vitest run --project server  # serveur seul
+npx vitest run --project web     # interface seule
 ```
 
-212 tests, aucun n'accède au matériel réel : tout passe par un backend hwmon
-simulé qui reproduit variation de RPM, panne de capteur, écriture refusée,
-retour BIOS, changement d'index `hwmon`, disparition d'une sortie et
-remplacement d'un contrôleur. Aucune calibration ni aucun contrôle PWM réel
-n'est exécuté, et la suite ne laisse **aucun rejet de promesse non géré**.
+**347 tests** répartis en deux projets aux contraintes opposées.
+
+### Serveur — 212 tests
+
+Aucun n'accède au matériel réel : tout passe par un backend hwmon simulé qui
+reproduit variation de RPM, panne de capteur, écriture refusée, retour BIOS,
+changement d'index `hwmon`, disparition d'une sortie et remplacement d'un
+contrôleur. Aucune calibration ni aucun contrôle PWM réel n'est exécuté, et la
+suite ne laisse **aucun rejet de promesse non géré**.
+
+Ils s'exécutent en environnement Node, dans un seul processus et sans
+parallélisme : ils partagent des répertoires temporaires et des verrous de
+moteur.
+
+### Interface — 135 tests
+
+En jsdom, parallélisables. `src/test/setup.ts` fournit ce que jsdom n'implémente
+pas et dont la refonte dépend : `matchMedia` évaluant réellement les largeurs et
+la nature du pointeur, un `visualViewport` pilotable, `ResizeObserver`, et des
+utilitaires simulant l'ouverture du clavier, une rotation et une coupure réseau.
+
+| Fichier | Couverture |
+|---|---|
+| `src/ui/viewport.test.ts` | hauteurs iOS : clavier, rotation, stabilisation |
+| `src/ui/useConnectionState.test.tsx` | refus des commandes hors ligne et sur données périmées |
+| `src/ui/overlays.test.tsx` | piège de focus, Échap, feuilles, confirmations |
+| `src/ui/Measure.test.tsx` | provenance : réel, simulé, indisponible, absent |
+| `src/ui/Navigation.test.tsx` | navigation responsive et noms accessibles |
+| `src/ui/accessibility.test.tsx` | contrastes calculés, cibles tactiles, rôles |
+| `src/features/hardware/CurveEditor.test.tsx` | clavier, saisie numérique, contraintes |
+| `src/pwa/pwa.test.ts` | manifest, icônes, politique de cache du worker |
+| `src/store/useConfigStore.test.ts` | disposition, services manuels, corrections |
 
 | Fichier | Couverture |
 |---|---|
@@ -726,10 +910,43 @@ systemd-analyze verify \
 
 ---
 
+## Documentation technique
+
+| Document | Contenu |
+|---|---|
+| [docs/DESIGN-SYSTEM.md](docs/DESIGN-SYSTEM.md) | jetons, contrastes, cibles tactiles, règles d'ajout d'un composant |
+| [docs/RESPONSIVE.md](docs/RESPONSIVE.md) | points de rupture, présentations mobiles, zones sûres, procédure de contrôle |
+| [docs/PWA.md](docs/PWA.md) | stratégie de cache, comportement hors ligne, viewport iOS, installation |
+| [docs/ROLLBACK.md](docs/ROLLBACK.md) | retour à la version précédente, purge du service worker |
+| [docs/BASELINE.md](docs/BASELINE.md) | état de référence relevé avant la refonte |
+
+---
+
 ## Limites connues
 
 Ces limites sont **matérielles ou structurelles**. Elles sont documentées telles
 quelles plutôt que masquées.
+
+### Installation en PWA : HTTPS requis
+
+Les navigateurs n'enregistrent un service worker — et ne proposent donc
+l'installation ni le démarrage hors ligne — que dans un **contexte sécurisé** :
+`localhost`, `127.0.0.1` ou HTTPS. Une adresse IP locale en HTTP simple, cas
+habituel de `http://IP_PCIA:4321`, n'en est pas un.
+
+Conséquence : depuis un téléphone du réseau local, l'interface est pleinement
+utilisable et responsive, mais **ne peut pas être installée** telle quelle.
+
+C'est une contrainte de la plateforme web, indépendante de l'application. Pour
+la lever, placer un reverse proxy TLS devant le port 4321 — un certificat auto
+signé ou une autorité locale suffit, à condition qu'il soit approuvé sur
+l'appareil.
+
+Vérification depuis la console du navigateur :
+
+```js
+window.isSecureContext   // doit valoir true
+```
 
 ### Restitution au BIOS après un arrêt brutal
 
@@ -968,3 +1185,14 @@ d'origine et doit être refaite localement.
 
 React 18 · TypeScript · Vite · @xyflow/react · @dagrejs/dagre · Zustand · Recharts
 Node.js 22+ (validé sur 22.22.1) · Fastify · better-sqlite3 · zod · ws · Vitest
+
+Aucune dépendance d'exécution n'a été ajoutée par la refonte responsive et PWA :
+le service worker, le manifest et les icônes sont produits par du code du dépôt.
+Seules quatre dépendances de **développement** ont été ajoutées pour les tests
+d'interface — `jsdom`, `@testing-library/react`, `@testing-library/user-event`
+et `@testing-library/jest-dom` — toutes sous licence MIT. Elles ne sont jamais
+déployées : l'installation réinstalle les dépendances de production seules
+(`npm ci --omit=dev`).
+
+L'application ne charge **aucune ressource distante** : ni police, ni script, ni
+image. Elle reste utilisable sur un réseau local isolé, sans aucune télémétrie.
