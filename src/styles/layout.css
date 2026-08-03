@@ -1115,3 +1115,58 @@
     padding: var(--sp-2) var(--sp-3) 0;
   }
 }
+
+/* ---------- Section Matériel ----------
+ * Inventaire et schéma côte à côte au-delà de 1024 px, empilés en dessous —
+ * l'inventaire d'abord, c'est lui qui porte l'information. */
+.hw-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+@media (max-width: 1023px) {
+  .hw-layout {
+    grid-template-columns: 1fr;
+    gap: var(--sp-3);
+  }
+}
+
+.hw-inventory {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--sp-2);
+}
+
+/* La carte est un bouton : elle doit rester une carte, pas un contrôle de
+ * formulaire, tout en restant manifestement actionnable et focalisable. */
+.hw-card {
+  display: block;
+  width: 100%;
+  min-height: 0;
+  text-align: left;
+  font-size: inherit;
+  font-weight: inherit;
+  color: inherit;
+}
+
+.hw-card:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+
+.hw-card--selected {
+  border-color: var(--accent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* Composant absent : présenté, jamais masqué — un emplacement PCIe libre est
+ * une information. Il ne doit simplement pas attirer l'œil. */
+.hw-card--absent {
+  border-style: dashed;
+  opacity: 0.75;
+}
