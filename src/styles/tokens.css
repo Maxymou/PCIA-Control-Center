@@ -1,0 +1,207 @@
+/* ============================================================================
+ * PCIA Control Center — jetons de conception
+ *
+ * Source unique de toutes les valeurs visuelles. Aucun composant ne doit
+ * contenir de couleur, de rayon, d'ombre ou d'espacement en dur : si une valeur
+ * manque ici, on l'ajoute ici.
+ *
+ * Identité : centre de contrôle technique. Sombre, contrasté, dense sur poste
+ * de travail, confortable au doigt sur mobile. Aucun effet décoratif.
+ * ==========================================================================*/
+
+:root {
+  color-scheme: dark;
+
+  /* ---------- Fonds et surfaces ------------------------------------------
+   * Quatre niveaux seulement, séparés par une luminosité suffisante pour être
+   * distinguables sur un écran mat comme sur un écran de téléphone en plein
+   * jour. `--bg` est LA couleur de référence : elle est reprise à l'identique
+   * par html, body, #root, le manifest PWA et la balise theme-color. */
+  --bg: #101216;
+  --bg-raised: #16191f;
+  --surface: #1b1f26;
+  --surface-hover: #20252d;
+  --surface-sunken: #0c0e12;
+
+  /* Conservés : anciens noms encore employés par des composants métier. */
+  --card: var(--surface);
+  --card-hover: var(--surface-hover);
+
+  --border: #2a3038;
+  --border-strong: #39414c;
+  --border-focus: var(--accent);
+
+  /* ---------- Texte -------------------------------------------------------
+   * Contrastes mesurés sur --bg : text 14.8:1, text-2 6.4:1, text-3 4.6:1.
+   * --text-3 n'est utilisé que pour du texte non essentiel (unités, axes). */
+  --text: #e6e9ed;
+  --text-2: #9aa3ae;
+  --text-3: #7d8691;
+  --text-on-accent: #08101a;
+
+  /* ---------- Accent ---------------------------------------------------- */
+  --accent: #4d9dff;
+  --accent-dim: #2b5c99;
+  --accent-bg: rgba(77, 157, 255, 0.12);
+
+  /* ---------- États -------------------------------------------------------
+   * Jamais seules porteuses d'information : toujours doublées d'un libellé,
+   * d'une icône ou d'une forme (cf. règle d'accessibilité 1.4.1). */
+  --ok: #46d69a;
+  --warn: #ffb43d;
+  --crit: #ff6b63;
+  --off: #8b929c;
+
+  --ok-bg: rgba(70, 214, 154, 0.13);
+  --warn-bg: rgba(255, 180, 61, 0.14);
+  --crit-bg: rgba(255, 107, 99, 0.14);
+  --off-bg: rgba(139, 146, 156, 0.15);
+
+  --ok-border: rgba(70, 214, 154, 0.45);
+  --warn-border: rgba(255, 180, 61, 0.5);
+  --crit-border: rgba(255, 107, 99, 0.5);
+
+  /* ---------- Provenance de la donnée -------------------------------------
+   * Une mesure réelle, une mesure simulée et une mesure absente ne se
+   * ressemblent jamais. Voir src/ui/Measure.tsx. */
+  --data-real: var(--text);
+  --data-simulated: #c58cf2;
+  --data-simulated-bg: rgba(197, 140, 242, 0.14);
+  --data-missing: var(--text-3);
+  --data-error: var(--crit);
+
+  /* ---------- Palette des courbes -----------------------------------------
+   * Séries d'historique (températures, RPM, PWM). Teintes choisies pour rester
+   * distinguables en vision dichromate : la luminosité varie autant que la
+   * teinte, et chaque série reste identifiable par son étiquette de légende. */
+  --chart-1: #62aeff;
+  --chart-2: #46d69a;
+  --chart-3: #ffb43d;
+  --chart-4: #f2789f;
+  --chart-5: #b58cf2;
+  --chart-6: #9aa3ae;
+  --chart-7: #2fa872;
+
+  /* ---------- Typographie -------------------------------------------------
+   * Piles système uniquement : aucune police distante n'est téléchargée, le
+   * serveur reste autonome sur un réseau local isolé. */
+  --font: 'Segoe UI', Inter, system-ui, -apple-system, 'Helvetica Neue', sans-serif;
+  --mono: ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, Consolas, monospace;
+
+  --fs-xs: 0.6875rem;   /* 11px — badges, axes */
+  --fs-sm: 0.75rem;     /* 12px — texte secondaire */
+  --fs-base: 0.8125rem; /* 13px — contrôles */
+  --fs-md: 0.875rem;    /* 14px — corps */
+  --fs-lg: 1rem;        /* 16px — titres de section */
+  --fs-xl: 1.3125rem;   /* 21px — valeurs mises en avant */
+  --fs-2xl: 1.75rem;    /* 28px — chiffre principal d'une carte */
+
+  --lh-tight: 1.25;
+  --lh-base: 1.45;
+
+  --fw-medium: 550;
+  --fw-semibold: 650;
+  --fw-bold: 750;
+
+  /* ---------- Espacements (échelle de 4) --------------------------------- */
+  --sp-1: 0.25rem;
+  --sp-2: 0.5rem;
+  --sp-3: 0.75rem;
+  --sp-4: 1rem;
+  --sp-5: 1.25rem;
+  --sp-6: 1.5rem;
+  --sp-8: 2rem;
+  --sp-10: 2.5rem;
+
+  /* ---------- Rayons ----------------------------------------------------- */
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+
+  /* ---------- Ombres ------------------------------------------------------
+   * Volontairement discrètes : pas de flou coûteux à repeindre sur un flux
+   * temps réel, pas d'effet décoratif nuisant à la lisibilité. */
+  --shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  --shadow-panel: 0 8px 28px rgba(0, 0, 0, 0.45);
+  --shadow-overlay: 0 -6px 32px rgba(0, 0, 0, 0.55);
+
+  /* ---------- Cibles tactiles ---------------------------------------------
+   * 44 px est le minimum recommandé (WCAG 2.2 « Target Size »). Sur poste de
+   * travail on redescend à --control-h pour conserver la densité. */
+  --touch: 44px;
+  --touch-sm: 36px;
+  --control-h: 32px;
+
+  /* ---------- Durées ------------------------------------------------------ */
+  --dur-fast: 120ms;
+  --dur: 180ms;
+  --dur-slow: 260ms;
+  --ease: cubic-bezier(0.2, 0.7, 0.35, 1);
+
+  /* ---------- Plans (z-index) ---------------------------------------------
+   * Une seule échelle, pour que rien ne passe jamais derrière la navigation
+   * basse ou devant une modale par accident. */
+  --z-base: 0;
+  --z-graph-overlay: 5;
+  --z-sticky: 20;
+  --z-nav: 40;
+  --z-drawer: 60;
+  --z-banner: 70;
+  --z-modal: 100;
+  --z-tooltip: 120;
+  --z-toast: 140;
+
+  /* ---------- Grilles ----------------------------------------------------- */
+  --card-min: 220px;      /* largeur minimale d'une carte de synthèse */
+  --panel-w: 340px;       /* panneau latéral de détail (desktop) */
+  --nav-w: 216px;         /* navigation latérale déployée */
+  --nav-w-compact: 60px;  /* navigation latérale en icônes (tablette) */
+  --header-h: 52px;
+  --bottom-nav-h: 56px;
+  --content-max: 1720px;
+}
+
+/* ---------------------------------------------------------------------------
+ * Points de rupture — déclarés une seule fois, ici, en commentaire de
+ * référence. CSS ne permet pas encore `@custom-media` sans outillage ; les
+ * mêmes valeurs sont reprises telles quelles dans layout.css et dans
+ * src/ui/useBreakpoint.ts. Toute modification se fait aux trois endroits.
+ *
+ *   mobile   : < 768px    une colonne, navigation basse, feuilles mobiles
+ *   tablette : 768–1279px deux colonnes, navigation latérale compacte
+ *   desktop  : >= 1280px  vue dense, navigation latérale déployée
+ *
+ * `pointer: coarse` (et non la largeur) décide de l'agrandissement des cibles :
+ * un écran tactile de 1920px reste un écran tactile.
+ * ------------------------------------------------------------------------ */
+
+/* Écrans tactiles : toutes les cibles interactives passent au minimum WCAG. */
+@media (pointer: coarse) {
+  :root {
+    --control-h: var(--touch);
+    --touch-sm: var(--touch);
+    --fs-base: 0.875rem;
+    --fs-sm: 0.8125rem;
+  }
+}
+
+/* Réduction des animations : on ne supprime pas les transitions d'état utiles,
+ * on supprime tout mouvement et toute animation en boucle. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur: 0ms;
+    --dur-slow: 0ms;
+  }
+}
+
+/* Contraste renforcé : bordures plus franches, texte secondaire éclairci. */
+@media (prefers-contrast: more) {
+  :root {
+    --border: #414954;
+    --border-strong: #5a636f;
+    --text-2: #c2c9d2;
+    --text-3: #a3abb5;
+  }
+}

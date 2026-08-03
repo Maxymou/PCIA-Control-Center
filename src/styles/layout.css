@@ -1,0 +1,1045 @@
+/* ============================================================================
+ * PCIA Control Center — mise en page applicative
+ *
+ * Points de rupture (identiques à src/ui/useBreakpoint.ts) :
+ *   mobile   < 768px      une colonne, navigation basse, feuilles mobiles
+ *   tablette 768–1279px   deux colonnes, navigation latérale en icônes
+ *   desktop  >= 1280px    vue dense, navigation latérale déployée
+ *
+ * Aucune règle n'utilise 100vh ni `position: fixed; inset: 0` en dehors de
+ * `.app-viewport` (base.css) et des superpositions.
+ * ==========================================================================*/
+
+/* ===========================================================================
+ * Ossature
+ * ========================================================================*/
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+/* Corps : navigation latérale + contenu (desktop/tablette), ou contenu seul
+ * surmonté d'une navigation basse (mobile). */
+.app-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.app-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  /* Encoches latérales en paysage sur iPhone. */
+  padding-left: var(--sal);
+  padding-right: var(--sar);
+}
+
+/* ===========================================================================
+ * En-tête
+ * ========================================================================*/
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex: none;
+  min-height: var(--header-h);
+  padding: var(--sp-2) var(--sp-3);
+  /* La zone d'encoche haute est peinte par l'en-tête lui-même. */
+  padding-top: calc(var(--sp-2) + var(--sat));
+  padding-left: calc(var(--sp-3) + var(--sal));
+  padding-right: calc(var(--sp-3) + var(--sar));
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border);
+}
+
+.header .brand {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.header .brand .logo,
+.logo {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: 7px;
+  background: linear-gradient(135deg, var(--accent-dim), var(--accent));
+  display: grid;
+  place-items: center;
+  font-size: var(--fs-base);
+  color: var(--text-on-accent);
+  font-weight: var(--fw-bold);
+}
+
+.header .brand h1 {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.header .stat {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.header .stat b {
+  color: var(--text);
+  font-weight: var(--fw-semibold);
+}
+
+.header .sep {
+  width: 1px;
+  height: 22px;
+  background: var(--border);
+  flex: none;
+}
+
+.header .right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* Sous 1100px les indicateurs secondaires de l'en-tête disparaissent : ils sont
+ * repris, sans perte d'information, par la Vue d'ensemble et la barre d'état. */
+@media (max-width: 1099px) {
+  .header .stat--secondary,
+  .header .sep {
+    display: none;
+  }
+}
+
+.backend-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  padding: var(--sp-1) var(--sp-3);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
+ * Onglets horizontaux — navigation historique à deux entrées.
+ * Conservée le temps que la navigation à six sections la remplace, pour que
+ * chaque commit laisse une application fonctionnelle.
+ * ------------------------------------------------------------------------ */
+.tabs {
+  display: flex;
+  gap: var(--sp-1);
+  flex: none;
+  padding: var(--sp-2) var(--sp-3) 0;
+  padding-left: calc(var(--sp-3) + var(--sal));
+  padding-right: calc(var(--sp-3) + var(--sar));
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tabs::-webkit-scrollbar { display: none; }
+
+.tabs button {
+  flex: none;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-md);
+  color: var(--text-2);
+}
+
+.tabs button:hover { color: var(--text); background: transparent; }
+
+.tabs button.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+  font-weight: var(--fw-semibold);
+}
+
+.tab-content {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding-left: var(--sal);
+  padding-right: var(--sar);
+}
+
+/* ===========================================================================
+ * Navigation latérale (tablette et desktop)
+ * ========================================================================*/
+.app-nav {
+  flex: none;
+  width: var(--nav-w);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-3) var(--sp-2);
+  padding-left: calc(var(--sp-2) + var(--sal));
+  padding-bottom: calc(var(--sp-3) + var(--sab));
+  background: var(--bg-raised);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.app-nav__item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  min-height: var(--touch);
+  padding: 0 var(--sp-3);
+  justify-content: flex-start;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  font-size: var(--fs-base);
+  text-align: left;
+}
+
+.app-nav__item:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: transparent;
+  color: var(--text);
+}
+
+.app-nav__item[aria-current='page'] {
+  background: var(--accent-bg);
+  color: var(--text);
+  font-weight: var(--fw-semibold);
+  /* Barre d'accent : l'état actif ne repose pas que sur la couleur du texte. */
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.app-nav__icon {
+  font-size: var(--fs-lg);
+  line-height: 1;
+  flex: none;
+  width: 20px;
+  text-align: center;
+}
+
+.app-nav__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Pastille de comptage (alertes actives). */
+.app-nav__count {
+  flex: none;
+  min-width: 20px;
+  padding: 0 var(--sp-1);
+  border-radius: var(--radius-pill);
+  background: var(--crit-bg);
+  color: var(--crit);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  text-align: center;
+}
+
+/* Tablette : navigation réduite aux icônes, libellés en infobulle accessible. */
+@media (min-width: 768px) and (max-width: 1279px) {
+  .app-nav {
+    width: var(--nav-w-compact);
+    align-items: center;
+  }
+
+  .app-nav__item {
+    justify-content: center;
+    padding: 0;
+    width: var(--touch);
+  }
+
+  .app-nav__label {
+    display: none;
+  }
+
+  .app-nav__count {
+    position: absolute;
+    transform: translate(14px, -12px);
+  }
+
+  .app-nav__item {
+    position: relative;
+  }
+}
+
+/* ===========================================================================
+ * Navigation basse (mobile)
+ *
+ * Peint elle-même la zone de l'indicateur d'accueil : jamais de bande blanche,
+ * jamais de double marge, et le contenu n'est pas masqué puisque la barre est
+ * un frère du contenu, pas une superposition.
+ * ========================================================================*/
+.bottom-nav {
+  flex: none;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 2px;
+  padding: var(--sp-1) var(--sp-1) 0;
+  padding-bottom: var(--sab);
+  padding-left: calc(var(--sp-1) + var(--sal));
+  padding-right: calc(var(--sp-1) + var(--sar));
+  background: var(--bg-raised);
+  border-top: 1px solid var(--border);
+  /* Reste stable à l'ouverture du clavier : la barre appartient au flux du
+   * shell, dont la hauteur est --app-height (repère haut), pas --vvh. */
+}
+
+.bottom-nav__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: var(--bottom-nav-h);
+  padding: var(--sp-1) 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  position: relative;
+}
+
+.bottom-nav__item[aria-current='page'] {
+  color: var(--accent);
+  font-weight: var(--fw-semibold);
+  background: var(--accent-bg);
+}
+
+.bottom-nav__icon {
+  font-size: 1.125rem;
+  line-height: 1;
+}
+
+.bottom-nav__label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bottom-nav__count {
+  position: absolute;
+  top: var(--sp-1);
+  right: 22%;
+  min-width: 16px;
+  padding: 0 3px;
+  border-radius: var(--radius-pill);
+  background: var(--crit);
+  color: #1a0605;
+  font-size: 0.625rem;
+  font-weight: var(--fw-bold);
+  line-height: 16px;
+}
+
+/* ===========================================================================
+ * Contenu des sections
+ * ========================================================================*/
+.section {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: var(--sp-4);
+  padding-bottom: var(--sp-8);
+  display: grid;
+  gap: var(--sp-4);
+  align-content: start;
+}
+
+/* Section occupant tout l'espace sans défilement propre (graphe). */
+.section--flush {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+  gap: 0;
+}
+
+.section__inner {
+  width: 100%;
+  max-width: var(--content-max);
+  margin: 0 auto;
+  display: grid;
+  gap: var(--sp-4);
+  align-content: start;
+}
+
+.section-title {
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+}
+
+@media (max-width: 767px) {
+  .section {
+    padding: var(--sp-3);
+    padding-bottom: var(--sp-6);
+    gap: var(--sp-3);
+  }
+}
+
+/* Grille de cartes : s'adapte à la largeur réelle, sans nombre de colonnes figé.
+ * Remplace les anciennes grilles `repeat(6, 1fr)` qui débordaient sous 1280px. */
+.grid-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--card-min), 1fr));
+  gap: var(--sp-3);
+}
+
+.grid-cards--tight {
+  --card-min: 170px;
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+.grid-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr) minmax(0, 1.4fr);
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+@media (max-width: 1279px) {
+  .grid-main {
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  }
+}
+
+@media (max-width: 767px) {
+  .grid-main,
+  .grid-2 {
+    grid-template-columns: 1fr;
+    gap: var(--sp-3);
+  }
+}
+
+/* Carte de synthèse : un libellé, une valeur, un complément. */
+.stat-card .lbl {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.stat-card .big {
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-semibold);
+  font-family: var(--mono);
+  line-height: var(--lh-tight);
+}
+
+.stat-card .big--text {
+  font-family: var(--font);
+  font-size: var(--fs-lg);
+}
+
+/* ===========================================================================
+ * Services et connexions — graphe
+ * ========================================================================*/
+.programs {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.graph-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  flex: none;
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+}
+
+.graph-toolbar .group {
+  display: flex;
+  gap: var(--sp-1);
+  align-items: center;
+}
+
+.graph-toolbar .sep {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  margin: 0 var(--sp-1);
+}
+
+.graph-toolbar input[type='search'] {
+  width: 170px;
+  max-width: 40vw;
+}
+
+/* Barre d'outils condensée sur petit écran : elle défile horizontalement plutôt
+ * que d'imposer plusieurs lignes qui mangeraient la hauteur du graphe. */
+@media (max-width: 767px) {
+  .graph-toolbar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+
+  .graph-toolbar::-webkit-scrollbar { display: none; }
+  .graph-toolbar > * { flex: none; }
+}
+
+.programs-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.graph-wrap {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+}
+
+.side-panel {
+  width: var(--panel-w);
+  flex: none;
+  border-left: 1px solid var(--border);
+  background: var(--bg-raised);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--sp-4);
+  padding-bottom: calc(var(--sp-4) + var(--sab));
+}
+
+.side-panel h2 { font-size: var(--fs-md); }
+.side-panel section { margin-top: var(--sp-3); }
+
+.side-panel .conn-line {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  min-height: var(--touch-sm);
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+}
+
+.side-panel .conn-line:hover {
+  background: var(--surface-hover);
+}
+
+/* Tablette : panneau plus étroit. Mobile : il devient une feuille (Sheet). */
+@media (max-width: 1279px) {
+  .side-panel { width: 300px; }
+}
+
+@media (max-width: 767px) {
+  .side-panel { display: none; }
+}
+
+.graph-legend {
+  position: absolute;
+  left: var(--sp-2);
+  bottom: var(--sp-2);
+  z-index: var(--z-graph-overlay);
+  background: rgba(22, 25, 31, 0.94);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  display: grid;
+  gap: var(--sp-1);
+}
+
+.graph-legend .li {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.graph-legend .line {
+  width: 22px;
+  height: 0;
+  border-top: 2px solid var(--off);
+}
+
+/* La légende gêne plus qu'elle n'aide sur un petit écran : elle est repliée
+ * derrière un bouton d'aide dans la barre d'outils. */
+@media (max-width: 767px) {
+  .graph-legend { display: none; }
+}
+
+/* Commandes de zoom flottantes, atteignables au pouce. */
+.graph-controls {
+  position: absolute;
+  right: var(--sp-3);
+  bottom: calc(var(--sp-3) + var(--sab));
+  z-index: var(--z-graph-overlay);
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.graph-controls button {
+  width: var(--touch);
+  min-width: var(--touch);
+  min-height: var(--touch);
+  padding: 0;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow);
+  font-size: var(--fs-lg);
+}
+
+.save-state {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.save-state.error { color: var(--crit); }
+
+/* ---------- Nœud service ---------- */
+.svc-node {
+  width: 210px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  font-size: var(--fs-sm);
+  overflow: hidden;
+}
+
+.svc-node.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.svc-node.sev-border-warning { border-color: var(--warn-border); }
+.svc-node.sev-border-critical { border-color: var(--crit-border); }
+
+.svc-node .head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3) var(--sp-1);
+}
+
+.svc-node .head .icon { font-size: var(--fs-lg); }
+
+.svc-node .head .name {
+  font-weight: var(--fw-semibold);
+  font-size: var(--fs-sm);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.svc-node .meta {
+  padding: 0 var(--sp-3) var(--sp-2);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-2);
+}
+
+.svc-node .foot {
+  display: flex;
+  gap: var(--sp-1);
+  padding: 0 var(--sp-3) var(--sp-2);
+  flex-wrap: wrap;
+}
+
+/* ---------- Nœud groupe ---------- */
+.group-node {
+  border: 1.5px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: rgba(27, 31, 38, 0.35);
+  width: 100%;
+  height: 100%;
+}
+
+.group-node .g-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-3);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  color: var(--text-2);
+}
+
+.group-collapsed {
+  width: 230px;
+  background: var(--surface);
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-sm);
+}
+
+/* ---------- Vue liste (mobile et repli) ---------- */
+.service-list {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.service-list__item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  width: 100%;
+  min-height: var(--touch);
+  padding: var(--sp-3);
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.service-list__item:hover { background: var(--surface-hover); }
+.service-list__item.selected { border-color: var(--accent); }
+
+.service-list__name {
+  font-weight: var(--fw-semibold);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.service-list__meta {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-2);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+}
+
+/* ===========================================================================
+ * Matériel et ventilation
+ * ========================================================================*/
+
+/* Ancien conteneur de l'onglet « Hardware & Ventilation ». Les grilles à nombre
+ * de colonnes figé (`repeat(6, 1fr)`, `1.1fr 0.9fr 1.4fr`) sont remplacées par
+ * des grilles fluides : plus aucun débordement horizontal sous 1280 px. */
+.hardware {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: var(--sp-4);
+  padding-bottom: calc(var(--sp-8) + var(--sab));
+  display: grid;
+  gap: var(--sp-4);
+  align-content: start;
+}
+
+.hw-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: var(--sp-3);
+}
+
+.hw-summary .card-pad { padding: var(--sp-2) var(--sp-3); }
+
+.hw-summary .big {
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-semibold);
+  font-family: var(--mono);
+  line-height: var(--lh-tight);
+}
+
+.hw-summary .lbl {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.hw-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr) minmax(0, 1.4fr);
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+.hw-history {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--sp-4);
+}
+
+@media (max-width: 1279px) {
+  .hw-main { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+}
+
+@media (max-width: 767px) {
+  .hardware {
+    padding: var(--sp-3);
+    gap: var(--sp-3);
+  }
+
+  .hw-main { grid-template-columns: 1fr; }
+}
+.hw-schema svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.hw-schema .slot { cursor: pointer; }
+.hw-schema .slot rect { transition: stroke var(--dur-fast) var(--ease); }
+.hw-schema .slot:hover rect { stroke: var(--accent); }
+.hw-schema .slot:focus-visible rect { stroke: var(--accent); stroke-width: 2.5; }
+
+/* Sorties ventilateur */
+.fan-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--sp-1) var(--sp-3);
+  width: 100%;
+  min-height: var(--touch);
+  padding: var(--sp-2) var(--sp-3);
+  text-align: left;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+}
+
+.fan-row:hover { background: var(--surface-hover); }
+
+.fan-row.selected {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+/* Éditeur de courbe */
+.curve-editor svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  user-select: none;
+  /* Indispensable : sans cela, faire glisser un point fait défiler la page. */
+  touch-action: none;
+}
+
+.curve-editor .pt { cursor: grab; }
+.curve-editor .pt:active { cursor: grabbing; }
+.curve-editor .pt:focus-visible { outline: none; }
+
+/* Panneau d'édition numérique d'un point — le seul moyen précis sur mobile. */
+.curve-point-editor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+}
+
+.curve-point-editor label.field { width: 92px; }
+
+/* Historique */
+.chart-card { min-height: 260px; }
+
+.legend-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-sm);
+  min-height: var(--touch-sm);
+  padding: 0 var(--sp-2);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  background: transparent;
+}
+
+.legend-toggle.on {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.legend-toggle .sw {
+  width: 10px;
+  height: 3px;
+  border-radius: 2px;
+}
+
+/* Événements */
+.event-row {
+  display: grid;
+  grid-template-columns: 64px 110px 1fr;
+  gap: var(--sp-3);
+  font-size: var(--fs-sm);
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--radius-sm);
+}
+
+.event-row:nth-child(odd) { background: rgba(255, 255, 255, 0.02); }
+
+@media (max-width: 640px) {
+  .event-row {
+    grid-template-columns: auto 1fr;
+    gap: var(--sp-1) var(--sp-2);
+  }
+
+  .event-row > :nth-child(3) { grid-column: 1 / -1; }
+}
+
+/* ===========================================================================
+ * Panneaux flottants
+ * ========================================================================*/
+.alerts-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: var(--app-height);
+  width: min(420px, 100%);
+  z-index: var(--z-drawer);
+  background: var(--bg-raised);
+  border-left: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-panel);
+  display: flex;
+  flex-direction: column;
+}
+
+.alerts-drawer header {
+  padding: var(--sp-3) var(--sp-4);
+  padding-top: calc(var(--sp-3) + var(--sat));
+  border-bottom: 1px solid var(--border);
+}
+
+.alerts-drawer .list {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--sp-3);
+  padding-bottom: calc(var(--sp-3) + var(--sab));
+  display: grid;
+  gap: var(--sp-2);
+  align-content: start;
+}
+
+.alert-card {
+  padding: var(--sp-3);
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.alert-card .msg {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+}
+
+.conflict-banner {
+  position: fixed;
+  top: calc(var(--header-h) + var(--sat) + var(--sp-2));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--z-banner);
+  background: var(--bg-raised);
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-panel);
+  padding: var(--sp-3) var(--sp-4);
+  width: min(560px, calc(100vw - 2 * var(--sp-3)));
+  display: grid;
+  gap: var(--sp-2);
+}
+
+/* Panneau de démonstration : flottant tant qu'il n'a pas rejoint la section
+ * Paramètres. Ancré au-dessus de la zone sûre basse pour ne jamais chevaucher
+ * l'indicateur d'accueil ni la future navigation basse. */
+.dev-panel {
+  position: fixed;
+  right: var(--sp-3);
+  bottom: calc(var(--sp-3) + var(--sab));
+  z-index: var(--z-drawer);
+  width: min(280px, calc(100vw - 2 * var(--sp-3)));
+}
+
+/* Intégré au flux (section Paramètres). */
+.dev-panel--inline {
+  position: static;
+  width: 100%;
+}
+
+.dev-panel .body {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+}
+
+.dev-panel button {
+  justify-content: flex-start;
+  text-align: left;
+  font-size: var(--fs-sm);
+}
+
+.dev-panel .head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  cursor: pointer;
+  user-select: none;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--warn);
+  background: transparent;
+  border: none;
+}

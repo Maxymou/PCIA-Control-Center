@@ -183,12 +183,12 @@ function ProgramsInner() {
             colorMode="dark"
             style={{ background: 'var(--bg)' }}
           >
-            <Background gap={24} size={1.5} color="#232830" />
+            <Background gap={24} size={1.5} color="var(--border)" />
             <MiniMap
               pannable zoomable
               style={{ background: 'var(--bg-raised)' }}
               maskColor="rgba(10, 12, 15, 0.6)"
-              nodeColor={() => '#2f3640'}
+              nodeColor={() => 'var(--border-strong)'}
             />
           </ReactFlow>
           <div className="graph-legend" aria-hidden>

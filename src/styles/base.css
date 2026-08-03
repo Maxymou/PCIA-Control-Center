@@ -1,0 +1,240 @@
+/* ============================================================================
+ * PCIA Control Center — socle global
+ *
+ * Réinitialisation minimale, fond unique, zones sûres iOS et gestion centralisée
+ * de la hauteur de l'application. Rien de spécifique à un composant ici.
+ * ==========================================================================*/
+
+/* ---------------------------------------------------------------------------
+ * Zones sûres et hauteurs
+ *
+ * `--sat/--sab/--sal/--sar` : encoches et indicateur d'accueil iOS. Déclarées
+ * une seule fois ; aucun composant n'appelle `env()` directement, ce qui évite
+ * les doubles marges quand deux conteneurs imbriqués tentent chacun leur
+ * compensation.
+ *
+ * `--app-height` : hauteur **stable** de l'application. Écrite par
+ * src/ui/useViewport.ts (repère haut, réinitialisé à chaque vraie rotation).
+ * L'ouverture du clavier ne la réduit pas : le shell ne saute donc pas.
+ *
+ * `--vvh` : hauteur **réellement visible**, clavier compris. Réservée aux rares
+ * écrans qui doivent suivre le clavier (formulaires plein écran).
+ *
+ * Les valeurs de repli (`100dvh`, puis `100vh`) permettent un premier rendu
+ * correct avant l'exécution du JavaScript et sur les navigateurs sans
+ * `visualViewport`.
+ * ------------------------------------------------------------------------ */
+:root {
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+
+  --app-height: 100vh;
+  --vvh: 100vh;
+}
+
+@supports (height: 100dvh) {
+  :root {
+    --app-height: 100dvh;
+    --vvh: 100dvh;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* Un seul et même fond partout : aucun flash blanc au lancement de la PWA, ni
+ * au rebond de défilement iOS, ni derrière l'indicateur d'accueil. La valeur est
+ * strictement celle du manifest et de la balise `theme-color`. */
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  background-color: var(--bg);
+  height: var(--app-height);
+  min-height: var(--app-height);
+}
+
+html {
+  /* Empêche l'agrandissement automatique du texte en paysage sur iOS, qui
+   * casserait la densité sans que l'utilisateur l'ait demandé. Le zoom manuel,
+   * lui, reste possible (aucun `user-scalable=no`). */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-md);
+  line-height: var(--lh-base);
+  /* Le défilement se fait à l'intérieur des panneaux, jamais sur le document :
+   * indispensable pour que la navigation basse et l'en-tête restent fixes en
+   * PWA installée sur iOS. */
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  isolation: isolate;
+}
+
+/* ---------------------------------------------------------------------------
+ * Conteneur plein écran
+ *
+ * Seule façon autorisée d'occuper l'écran entier. On n'écrit nulle part ailleurs
+ * `height: 100vh`, `min-height: 100vh` ni `position: fixed; inset: 0` : ces
+ * valeurs sont fausses sur iOS dès que la barre d'URL se rétracte ou que le
+ * clavier s'ouvre.
+ * ------------------------------------------------------------------------ */
+.app-viewport {
+  position: fixed;
+  inset: 0 auto auto 0;
+  width: 100%;
+  height: var(--app-height);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Variante pour les écrans devant suivre le clavier (formulaire plein écran). */
+.app-viewport--keyboard {
+  height: var(--vvh);
+}
+
+/* ---------- Zones de défilement ---------------------------------------- */
+.scroll-y {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ---------- Défilement ------------------------------------------------- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ---------- Focus -------------------------------------------------------
+ * Un anneau unique, visible sur toutes les surfaces, jamais supprimé. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Le focus programmatique posé sur un conteneur (modale, feuille) ne doit pas
+ * dessiner d'anneau : il n'est pas le résultat d'une navigation clavier. */
+[tabindex='-1']:focus {
+  outline: none;
+}
+
+/* ---------- Titres et éléments de base ---------------------------------- */
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-tight);
+}
+
+h1 { font-size: var(--fs-lg); }
+h2 { font-size: var(--fs-md); }
+h3 { font-size: var(--fs-md); }
+h4 { font-size: var(--fs-base); }
+
+p { margin: 0 0 var(--sp-2); }
+
+a {
+  color: var(--accent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+img,
+svg {
+  max-width: 100%;
+}
+
+/* ---------- Contenu réservé aux lecteurs d'écran ------------------------ */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Lien d'évitement : premier élément focalisable de la page. */
+.skip-link {
+  position: absolute;
+  top: calc(var(--sat) + var(--sp-2));
+  left: var(--sp-2);
+  z-index: var(--z-toast);
+  padding: var(--sp-2) var(--sp-4);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  border-radius: var(--radius-sm);
+  font-weight: var(--fw-semibold);
+  transform: translateY(-200%);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+/* ---------- Mouvement --------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ---------- Impression --------------------------------------------------
+ * Un rapport d'état imprimé ou exporté en PDF doit rester lisible. */
+@media print {
+  html,
+  body,
+  #root {
+    height: auto;
+    background: #fff;
+    color: #000;
+    overflow: visible;
+  }
+
+  .app-viewport {
+    position: static;
+    height: auto;
+  }
+}

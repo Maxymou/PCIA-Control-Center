@@ -7,25 +7,30 @@ import { useConfigStore } from '../../store/useConfigStore';
 import type { FanId, HardwareId } from '../../types';
 import { fmtShortTime, fmtTime } from '../../utils/format';
 
+// Couleurs prises dans la palette de courbes du design system : aucune valeur
+// en dur ici, la teinte reste modifiable en un seul endroit (tokens.css).
 const TEMP_SERIES: { id: HardwareId; label: string; color: string }[] = [
-  { id: 'cpu', label: 'CPU', color: '#4d9dff' },
-  { id: 'v100-1', label: 'V100 n°1', color: '#3ecf8e' },
-  { id: 'v100-2', label: 'V100 n°2', color: '#2fa872' },
-  { id: 'gtx1080', label: 'GTX 1080', color: '#e35d8f' },
-  { id: 'nvme', label: 'NVMe', color: '#f5a524' },
-  { id: 'motherboard', label: 'Carte mère', color: '#9aa3ae' },
+  { id: 'cpu', label: 'CPU', color: 'var(--chart-1)' },
+  { id: 'v100-1', label: 'V100 n°1', color: 'var(--chart-2)' },
+  { id: 'v100-2', label: 'V100 n°2', color: 'var(--chart-7)' },
+  { id: 'gtx1080', label: 'GTX 1080', color: 'var(--chart-4)' },
+  { id: 'nvme', label: 'NVMe', color: 'var(--chart-3)' },
+  { id: 'motherboard', label: 'Carte mère', color: 'var(--chart-6)' },
 ];
 
 const FAN_SERIES: { id: FanId; label: string; color: string }[] = [
-  { id: 'CPU_FAN1', label: 'CPU_FAN1', color: '#4d9dff' },
-  { id: 'SYS_FAN1', label: 'SYS_FAN1', color: '#3ecf8e' },
-  { id: 'SYS_FAN2', label: 'SYS_FAN2', color: '#f5a524' },
-  { id: 'SYS_FAN3', label: 'SYS_FAN3', color: '#e35d8f' },
-  { id: 'SYS_FAN4', label: 'SYS_FAN4', color: '#b58cf2' },
+  { id: 'CPU_FAN1', label: 'CPU_FAN1', color: 'var(--chart-1)' },
+  { id: 'SYS_FAN1', label: 'SYS_FAN1', color: 'var(--chart-2)' },
+  { id: 'SYS_FAN2', label: 'SYS_FAN2', color: 'var(--chart-3)' },
+  { id: 'SYS_FAN3', label: 'SYS_FAN3', color: 'var(--chart-4)' },
+  { id: 'SYS_FAN4', label: 'SYS_FAN4', color: 'var(--chart-5)' },
 ];
 
 const tooltipStyle = {
-  background: '#0c0e12', border: '1px solid var(--border-strong)', borderRadius: 8, fontSize: 12,
+  background: 'var(--surface-sunken)',
+  border: '1px solid var(--border-strong)',
+  borderRadius: 'var(--radius-sm)',
+  fontSize: 12,
 };
 
 function LegendToggles<T extends string>({ series, hidden, onToggle }: {

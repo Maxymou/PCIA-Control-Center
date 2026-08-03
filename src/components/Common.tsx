@@ -16,13 +16,13 @@ export function Modal({ title, onClose, children }: {
     return () => window.removeEventListener('keydown', h, true);
   }, [onClose]);
   return (
-    <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="modal" role="dialog" aria-modal="true" aria-label={title}>
-        <div className="spread">
-          <h3>{title}</h3>
+        <div className="modal__header">
+          <h3 className="modal__title">{title}</h3>
           <button className="btn-ghost btn-icon" onClick={onClose} aria-label="Fermer">✕</button>
         </div>
-        {children}
+        <div className="modal__body">{children}</div>
       </div>
     </div>
   );

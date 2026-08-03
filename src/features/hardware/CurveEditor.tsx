@@ -122,7 +122,7 @@ export function CurveEditor({ curve, currentTemp, currentRpm, onChange, onCommit
 
         {/* Marqueur de fonctionnement actuel */}
         <line x1={x(clampedT)} x2={x(clampedT)} y1={M.t} y2={H - M.b} stroke="var(--text-2)" strokeWidth="1" strokeDasharray="3 3" />
-        <circle cx={x(clampedT)} cy={y(curPwm)} r="5.5" fill="var(--ok)" stroke="#0d1013" strokeWidth="1.5" />
+        <circle cx={x(clampedT)} cy={y(curPwm)} r="5.5" fill="var(--ok)" stroke="var(--surface-sunken)" strokeWidth="1.5" />
         <text x={Math.min(x(clampedT) + 8, W - 120)} y={Math.max(y(curPwm) - 10, 16)} fontSize="10.5" fill="var(--text)" className="mono">
           {currentTemp.toFixed(1)} °C → {Math.round(curPwm)} % · {currentRpm} RPM
         </text>
@@ -146,7 +146,7 @@ export function CurveEditor({ curve, currentTemp, currentRpm, onChange, onCommit
         {/* Infobulle */}
         {hover && (
           <g transform={`translate(${Math.min(hover.x + 10, W - 92)}, ${Math.max(hover.y - 34, 6)})`}>
-            <rect width="84" height="24" rx="5" fill="#0c0e12" stroke="var(--border-strong)" />
+            <rect width="84" height="24" rx="5" fill="var(--surface-sunken)" stroke="var(--border-strong)" />
             <text x="42" y="16" textAnchor="middle" fontSize="10.5" fill="var(--text)" className="mono">
               {hover.temp} °C · {hover.pwm} %
             </text>
