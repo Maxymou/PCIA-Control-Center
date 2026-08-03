@@ -132,7 +132,7 @@ export function ConnectionModal({ existing, correcting, onClose }: {
             </select>
           </label>
           <button
-            className="btn-icon" style={{ marginTop: 18 }} data-tip="Inverser le sens"
+            className="btn-icon" style={{ marginTop: 18 }} title="Inverser le sens de la connexion"
             onClick={() => setF((p) => ({ ...p, sourceId: p.targetId, targetId: p.sourceId }))}
           >⇄</button>
           <label className="field" style={{ flex: 1 }}>Service destination

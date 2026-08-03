@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FanCurve } from '../../types';
 import { clampPoint, evalCurve, sortCurve, TEMP_MAX, TEMP_MIN } from '../../utils/curve';
+import { Tooltip } from '../../ui/Tooltip';
 
 const W = 560, H = 280;
 const M = { l: 44, r: 16, t: 14, b: 30 };
@@ -168,10 +169,11 @@ export function CurveEditor({ curve, currentTemp, currentRpm, onChange, onCommit
               <input type="number" className="mono" style={{ width: 64 }} min={0} max={100}
                 value={curve[selIdx].pwm} onChange={(e) => editSelected('pwm', Number(e.target.value))} />
             </label>
-            <button className="btn-sm" onClick={removeSelected} disabled={curve.length <= 2}
-              data-tip={curve.length <= 2 ? 'Minimum 2 points' : 'Supprimer le point sélectionné'}>
-              Supprimer le point
-            </button>
+            <Tooltip content={curve.length <= 2 ? 'Une courbe comporte au minimum deux points' : 'Supprimer le point sélectionné'}>
+              <button className="btn-sm" onClick={removeSelected} disabled={curve.length <= 2}>
+                Supprimer le point
+              </button>
+            </Tooltip>
           </span>
         )}
       </div>

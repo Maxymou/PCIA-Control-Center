@@ -3,6 +3,7 @@ import { useConfigStore } from '../../store/useConfigStore';
 import { dataService } from '../../services/dataService';
 import type { FanProfile } from '../../types';
 import { Confirm, Modal } from '../../components/Common';
+import { Tooltip } from '../../ui/Tooltip';
 
 /** Mini-aperçu des courbes d'un profil. */
 function ProfilePreview({ p }: { p: FanProfile }) {
@@ -40,9 +41,9 @@ export function ProfilesBar() {
         <div className="row">
           <button className="btn-sm" onClick={() => { setName(''); setCreating(true); }}>Créer un profil</button>
           <button className="btn-sm" onClick={() => cfg.duplicateProfile(cfg.activeProfileId)}>Dupliquer l’actif</button>
-          <button className="btn-sm" onClick={cfg.restoreBuiltinProfiles} data-tip="Réapplique les courbes d'origine du profil prédéfini actif">
-            Restaurer les prédéfinis
-          </button>
+          <Tooltip content="Réapplique les courbes d’origine du profil prédéfini actif">
+            <button className="btn-sm" onClick={cfg.restoreBuiltinProfiles}>Restaurer les prédéfinis</button>
+          </Tooltip>
         </div>
       </div>
       <div className="row" style={{ marginTop: 10, flexWrap: 'wrap', gap: 8, alignItems: 'stretch' }}>

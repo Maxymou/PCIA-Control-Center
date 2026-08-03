@@ -7,6 +7,7 @@ import type { FanCurve, FanMode, HardwareId, SensorRef } from '../../types';
 import { FAN_MODE_LABELS } from '../../utils/labels';
 import { CurveEditor } from './CurveEditor';
 import { StatusDot } from '../../components/Common';
+import { HelpTip } from '../../ui/Tooltip';
 
 const SENSOR_SOURCES: { id: HardwareId; label: string }[] = [
   { id: 'cpu', label: 'Température CPU' },
@@ -160,8 +161,14 @@ export function FanSettings() {
       )}
 
       <div className="row" style={{ marginTop: 10, gap: 12, alignItems: 'flex-start' }}>
-        <label className="field" style={{ flex: 1 }} data-tip="Destination physique du ventilateur">
-          Matériel attribué
+        <label className="field" style={{ flex: 1 }}>
+          <span className="row">
+            Matériel attribué
+            <HelpTip label="À quoi sert le matériel attribué ?">
+              Destination physique du ventilateur. Sert à l’affichage et au schéma :
+              c’est le capteur de référence, réglé à côté, qui pilote la courbe.
+            </HelpTip>
+          </span>
           <select value={fan.assignedHardware}
             onChange={(e) => cfg.updateFan(fan.id, { assignedHardware: e.target.value as HardwareId | 'none' | 'custom' })}>
             {ASSIGN_OPTIONS.filter((o) => o.id !== 'gtx1080' || gtxInstalled).map((o) => (
@@ -169,8 +176,15 @@ export function FanSettings() {
             ))}
           </select>
         </label>
-        <label className="field" style={{ flex: 1 }} data-tip="Température pilotant la courbe — indépendante du matériel attribué">
-          Capteur de référence
+        <label className="field" style={{ flex: 1 }}>
+          <span className="row">
+            Capteur de référence
+            <HelpTip label="À quoi sert le capteur de référence ?">
+              Température qui pilote la courbe de cette sortie. Elle est
+              indépendante du matériel attribué : une sortie peut souffler sur la
+              façade tout en suivant la température du GPU le plus chaud.
+            </HelpTip>
+          </span>
           <select value={sensorValue} onChange={(e) => setSensor(e.target.value)}>
             {SENSOR_SOURCES.filter((s) => s.id !== 'gtx1080' || gtxInstalled).map((s) => (
               <option key={s.id} value={s.id}>{s.label}</option>
