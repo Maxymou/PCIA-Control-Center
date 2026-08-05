@@ -29,7 +29,9 @@ let conflicts: ConnectionConflict[] = [];
 let hardware: HardwareItem[] = buildHardware(gtxInstalled);
 let fanConfigs: FanConfig[] = structuredClone(seedFanConfigs);
 let fanLive: Record<FanId, FanLive> = Object.fromEntries(
-  fanConfigs.map((f) => [f.id, { id: f.id, pwm: 30, rpm: 900, refTemp: 50, status: 'normal' as Severity }]),
+  fanConfigs.map((f) => [f.id, {
+    id: f.id, pwm: 30, rpm: 900, rpmSource: 'simulated' as const, refTemp: 50, status: 'normal' as Severity,
+  }]),
 ) as Record<FanId, FanLive>;
 let alerts: Alert[] = [];
 let events: AppEvent[] = [];
@@ -190,7 +192,7 @@ function tick() {
       delete stallSince[cfg.id];
       live.stalled = false;
       const target = FAN_MAX_RPM[cfg.id] * (live.pwm / 100);
-      live.rpm = Math.max(0, Math.round(drift(live.rpm, target, 0.4, 12)));
+      live.rpm = Math.max(0, Math.round(drift(live.rpm ?? 0, target, 0.4, 12)));
       if (live.pwm === 0) live.rpm = 0;
       live.status = live.rpm > 0 && live.rpm < cfg.warnRpm && live.pwm > 20 ? 'warning' : 'normal';
       resolveAlerts('fan', cfg.id);
@@ -222,7 +224,10 @@ function tick() {
       }
     }
     for (const f of fanConfigs) {
-      point.rpm[f.id] = fanLive[f.id].rpm;
+      // Une vitesse absente ne crée pas de point : la courbe doit montrer un
+      // trou, pas une chute à zéro.
+      const rpm = fanLive[f.id].rpm;
+      if (rpm !== null) point.rpm[f.id] = rpm;
       point.pwm[f.id] = fanLive[f.id].pwm;
     }
     history = [...history, point].filter((p) => p.t > t - HISTORY_SPAN_MS);

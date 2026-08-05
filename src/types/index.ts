@@ -140,10 +140,20 @@ export interface FanConfig {
   curve: FanCurve;          // courbe active (mode auto)
 }
 
+/** D'où vient la vitesse affichée.
+ *
+ *  Cette distinction est une exigence de sécurité, pas un confort d'affichage :
+ *  un « 0 RPM » inventé parce que la mesure manque ressemble à un ventilateur
+ *  arrêté, et un chiffre simulé ressemble à une mesure. Les trois cas doivent
+ *  rester discernables jusque dans l'interface. */
+export type RpmSource = 'measured' | 'simulated' | 'unavailable';
+
 export interface FanLive {
   id: FanId;
   pwm: number;              // consigne appliquée
-  rpm: number;
+  /** `null` = aucune mesure exploitable. Jamais remplacé par 0. */
+  rpm: number | null;
+  rpmSource: RpmSource;
   refTemp: number;
   status: Severity;
   testRemaining?: number;   // secondes restantes en mode test
@@ -258,6 +268,8 @@ export interface FanOutputState {
   pwm: number;
   requestedPwm: number;
   rpm: number | null;
+  /** Provenance de `rpm` — mesure réelle, simulation, ou rien. */
+  rpmSource: RpmSource;
   refTemp: number | null;
   sensorLostSince: number | null;
   stalled: boolean;
@@ -265,7 +277,17 @@ export interface FanOutputState {
   testRemainingS: number | null;
   lastWriteError: string | null;
   writeFailures: number;
+  /** Sortie PWM réellement pilotée (contrôle logiciel). */
   boundOutputKey: string | null;
+  /** Sortie PWM observée — identique à `boundOutputKey` sous contrôle logiciel,
+   *  renseignée aussi sous contrôle BIOS quand le mappage la désigne. */
+  monitorOutputKey: string | null;
+  /** Origine de la liaison : configuration déclarative ou calibration. */
+  mappingSource: 'config' | 'calibration' | 'none';
+  /** Nom du connecteur physique (CPU_FAN1, SYS_FAN3…). */
+  connectorLabel: string | null;
+  /** Chemin sysfs courant de la sortie — informatif, jamais une identité. */
+  hwmonPath: string | null;
   severity: Severity;
 }
 

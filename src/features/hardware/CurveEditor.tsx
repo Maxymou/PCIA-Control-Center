@@ -16,7 +16,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { FanCurve } from '../../types';
+import type { FanCurve, RpmSource } from '../../types';
+import { fmtRpm } from '../../utils/format';
 import { clampPoint, evalCurve, sortCurve, TEMP_MAX, TEMP_MIN } from '../../utils/curve';
 import { Tooltip } from '../../ui/Tooltip';
 
@@ -31,10 +32,11 @@ const y = (p: number) => M.t + (1 - p / 100) * PH;
 const xInv = (px: number) => TEMP_MIN + ((px - M.l) / PW) * (TEMP_MAX - TEMP_MIN);
 const yInv = (py: number) => (1 - (py - M.t) / PH) * 100;
 
-export function CurveEditor({ curve, currentTemp, currentRpm, onChange, onCommit, disabled = false }: {
+export function CurveEditor({ curve, currentTemp, currentRpm, currentRpmSource = 'measured', onChange, onCommit, disabled = false }: {
   curve: FanCurve;
   currentTemp: number;
-  currentRpm: number;
+  currentRpm: number | null;
+  currentRpmSource?: RpmSource;
   /** Appelé en continu pendant le déplacement (application immédiate). */
   onChange: (c: FanCurve) => void;
   /** Appelé à la fin d'une interaction (sauvegarde différée). */
@@ -235,7 +237,7 @@ export function CurveEditor({ curve, currentTemp, currentRpm, onChange, onCommit
         <line x1={x(clampedT)} x2={x(clampedT)} y1={M.t} y2={H - M.b} stroke="var(--text-2)" strokeWidth="1" strokeDasharray="3 3" />
         <circle cx={x(clampedT)} cy={y(curPwm)} r="5.5" fill="var(--ok)" stroke="var(--surface-sunken)" strokeWidth="1.5" />
         <text x={Math.min(x(clampedT) + 8, W - 120)} y={Math.max(y(curPwm) - 10, 16)} fontSize="10.5" fill="var(--text)" className="mono">
-          {currentTemp.toFixed(1)} °C → {Math.round(curPwm)} % · {currentRpm} RPM
+          {currentTemp.toFixed(1)} °C → {Math.round(curPwm)} % · {fmtRpm(currentRpm, currentRpmSource)}
         </text>
 
         {/* Points. La cible de saisie invisible est bien plus large que le

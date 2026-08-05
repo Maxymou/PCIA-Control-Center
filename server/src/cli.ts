@@ -17,6 +17,7 @@ import { readSystemInfo } from './system/info.js';
 import { hasTool, KNOWN_TOOLS } from './system/exec.js';
 import { FAN_IDS } from './contract.js';
 import { defaultFanConfigs, DEFAULT_PROFILE_ID } from './fan/defaults.js';
+import { collectTachs, resolveFanMapping } from './hwmon/mapping.js';
 
 const log = createLogger('cli');
 
@@ -150,6 +151,27 @@ async function main(): Promise<void> {
         '',
         'Capteurs de température :',
         ...discovery.tempSensors.map((s) => `  ${(s.label ?? `temp${s.index}`).padEnd(18)} ${s.valueC ?? '—'} °C   ${s.key}`),
+        '',
+        // Les canaux RPM non corrélés à une sortie PWM sont précisément ceux
+        // qu'il faut attribuer à la main dans `fans.mapping` : sans eux, une
+        // sortie peut être pilotée sans jamais qu'on sache si elle tourne.
+        'Canaux RPM sans sortie PWM corrélée :',
+        ...(discovery.orphanTachs.length
+          ? discovery.orphanTachs.map((t) => `  ${t.key.padEnd(28)} rpm=${t.rpm ?? '—'}\n    ${t.path}`)
+          : ['  (aucun)']),
+        '',
+        'Mappage déclaré dans la configuration :',
+        ...(Object.keys(config.fans.mapping).length
+          ? [...resolveFanMapping(
+            config.fans.mapping,
+            discovery,
+            collectTachs(discovery, (key) => env.hwmon.tachKeysForController(key)),
+          ).values()].map(
+            (m) => `  ${m.fanId.padEnd(9)} ${m.outputKey ?? 'NON RÉSOLU'}`
+              + `${m.tachKey === undefined ? '' : `  rpm=${m.tachKey ?? 'aucun'}`}`
+              + (m.warnings.length ? `\n${m.warnings.map((w) => `    ! ${w}`).join('\n')}` : ''),
+          )
+          : ['  (aucun — les liaisons viennent uniquement de la calibration)']),
         ...(discovery.warnings.length ? ['', 'Avertissements :', ...discovery.warnings.map((w) => `  ! ${w}`)] : []),
       ].join('\n'));
       break;

@@ -2,6 +2,7 @@ import { useLiveStore } from '../../store/useLiveStore';
 import { useConfigStore } from '../../store/useConfigStore';
 import { useUiStore } from '../../store/useUiStore';
 import type { FanId, HardwareId, Severity } from '../../types';
+import { fmtRpm, fmtRpmShort, rpmAriaLabel } from '../../utils/format';
 
 const SEV_COLOR: Record<Severity, string> = {
   normal: 'var(--ok)', warning: 'var(--warn)', critical: 'var(--crit)', unknown: 'var(--off)',
@@ -62,7 +63,7 @@ export function HardwareSchema() {
         role="button"
         tabIndex={0}
         aria-pressed={sel}
-        aria-label={`${cfg.displayName}${lv ? `, ${lv.rpm} tours par minute` : ', vitesse indisponible'}`}
+        aria-label={`${cfg.displayName}, ${rpmAriaLabel(lv?.rpm, lv?.rpmSource)}`}
         onClick={() => ui.selectFan(id)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -76,7 +77,7 @@ export function HardwareSchema() {
           stroke={sel ? 'var(--accent)' : 'var(--border)'} strokeWidth={sel ? 1.8 : 1} />
         <circle cx={x + 11} cy={y + 15} r="3.5" fill={SEV_COLOR[lv?.status ?? 'unknown']} />
         <text x={x + 20} y={y + 13} fontSize="9.5" fill="var(--text)" className="mono" fontWeight="600">{id}</text>
-        <text x={x + 20} y={y + 24} fontSize="9" fill="var(--text-2)" className="mono">{lv ? `${lv.rpm} RPM` : '—'}</text>
+        <text x={x + 20} y={y + 24} fontSize="9" fill="var(--text-2)" className="mono">{fmtRpmShort(lv?.rpm, lv?.rpmSource)}</text>
       </g>
     );
   };
@@ -165,7 +166,7 @@ export function HardwareSchema() {
             return (
               <li key={f.id}>
                 <b className="mono">{f.id}</b> ({f.displayName}) → {target}
-                {lv ? ` — ${lv.pwm} %, ${lv.rpm} RPM` : ' — état indisponible'}
+                {lv ? ` — ${lv.pwm} %, ${fmtRpm(lv.rpm, lv.rpmSource)}` : ' — état indisponible'}
               </li>
             );
           })}

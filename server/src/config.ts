@@ -109,6 +109,66 @@ const calibrationSchema = z.object({
   abortTemperatureC: z.number().min(40).max(110).default(85),
 });
 
+// ---------------------------------------------------------------------
+// Mappage sorties logiques ↔ matériel hwmon
+// ---------------------------------------------------------------------
+
+/** Critères d'identification d'un contrôleur hwmon.
+ *
+ *  Jamais « hwmon4 » : ce numéro est attribué dans l'ordre de sondage des
+ *  pilotes et change d'un démarrage à l'autre. On désigne le contrôleur par ce
+ *  qui ne bouge pas — son `name`, son pilote noyau, son bus, son adresse. */
+const controllerMatchSchema = z.object({
+  /** Contenu de `/sys/class/hwmon/hwmonN/name` (ex. nct6798, it8686). */
+  name: z.string().min(1).optional(),
+  /** Pilote noyau réel (`device/driver`, ex. nct6775). */
+  driver: z.string().min(1).optional(),
+  /** Sous-système du device (platform, pci, i2c…). */
+  bus: z.string().min(1).optional(),
+  /** Adresse sur le bus (ex. nct6775.2592, 0000:00:1f.3). */
+  address: z.string().min(1).optional(),
+  /** Empreinte exacte produite par `pcia-cli discover` (la plus précise). */
+  key: z.string().min(1).optional(),
+}).refine(
+  (m) => Boolean(m.name || m.driver || m.bus || m.address || m.key),
+  { message: 'au moins un critère d’identification est requis (name, driver, bus, address ou key)' },
+);
+
+export type ControllerMatch = z.infer<typeof controllerMatchSchema>;
+
+/** Description d'une sortie logique : quel PWM, quel canal RPM. */
+const fanMappingEntrySchema = z.object({
+  /** Nom du connecteur physique tel qu'il est sérigraphié sur la carte mère. */
+  label: z.string().min(1).max(60).optional(),
+  controller: controllerMatchSchema.optional(),
+  /** Index de la sortie (`pwm3` → 3). Sans valeur de `controller`, ignoré. */
+  pwm: z.number().int().min(0).max(31).optional(),
+  /** Index du tachymètre (`fan2_input` → 2). `null` = pas de retour RPM.
+   *  Absent = on garde la corrélation établie par la calibration. */
+  tach: z.number().int().min(0).max(31).nullable().optional(),
+  /** Chemin explicite vers le fichier pwmN. Le numéro hwmon qu'il contient est
+   *  neutralisé à la résolution : seul le device sous-jacent compte. */
+  pwmPath: z.string().min(1).optional(),
+  /** Chemin explicite vers le fichier fanN_input. */
+  tachPath: z.string().min(1).optional(),
+}).refine(
+  (e) => Boolean(e.controller || e.pwmPath),
+  { message: 'préciser `controller` (avec `pwm`) ou `pwm_path`' },
+);
+
+export type FanMappingEntry = z.infer<typeof fanMappingEntrySchema>;
+
+/** Identifiants des sorties logiques. Dupliqué volontairement depuis
+ *  `contract.ts` : la configuration se charge avant tout le reste et ne doit
+ *  dépendre d'aucun module applicatif. La conformité est vérifiée par un test. */
+export const CONFIGURABLE_FAN_IDS = ['CPU_FAN1', 'SYS_FAN1', 'SYS_FAN2', 'SYS_FAN3', 'SYS_FAN4'] as const;
+
+const fansSchema = z.object({
+  /** Mappage déclaratif. Toute sortie absente conserve le comportement
+   *  historique : liaison établie par l'assistant de calibration uniquement. */
+  mapping: z.partialRecord(z.enum(CONFIGURABLE_FAN_IDS), fanMappingEntrySchema).default({}),
+});
+
 const alertsSchema = z.object({
   /** Seuils [attention, critique] par identifiant matériel du front-end. */
   temperatureThresholds: z.record(z.string(), z.tuple([z.number(), z.number()])).default({
@@ -148,6 +208,7 @@ export const configSchema = z.object({
   history: historySchema.prefault({}),
   collector: collectorSchema.prefault({}),
   fanControl: fanControlSchema.prefault({}),
+  fans: fansSchema.prefault({}),
   calibration: calibrationSchema.prefault({}),
   alerts: alertsSchema.prefault({}),
   security: securitySchema.prefault({}),
@@ -161,14 +222,27 @@ const DEFAULT_CONFIG_PATHS = [
   '/etc/pcia-control-center/config.yml',
 ];
 
+/** Sections dont les clés sont des *identifiants*, pas des noms d'options.
+ *
+ *  Sans cette liste, `case-front` devenait `caseFront` et `v100-1` devenait
+ *  `v1001` : les seuils saisis par l'utilisateur étaient silencieusement rangés
+ *  sous une clé qui ne correspondait à aucun matériel, donc jamais appliqués.
+ *  Seules les clés directement filles de ces chemins sont préservées ; leur
+ *  contenu, lui, reste normalisé (`pwm_path` → `pwmPath`). */
+const IDENTIFIER_KEY_PATHS = new Set([
+  'alerts.temperatureThresholds',
+  'fans.mapping',
+]);
+
 /** Accepte les clés YAML en snake_case comme en camelCase. */
-function camelize(input: unknown): unknown {
-  if (Array.isArray(input)) return input.map(camelize);
+function camelize(input: unknown, path: string[] = []): unknown {
+  if (Array.isArray(input)) return input.map((v) => camelize(v, path));
   if (input && typeof input === 'object') {
+    const verbatim = IDENTIFIER_KEY_PATHS.has(path.join('.'));
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(input as Record<string, unknown>)) {
-      const key = k.replace(/[_-]([a-z0-9])/g, (_, c: string) => c.toUpperCase());
-      out[key] = camelize(v);
+      const key = verbatim ? k : k.replace(/[_-]([a-z0-9])/g, (_, c: string) => c.toUpperCase());
+      out[key] = camelize(v, [...path, key]);
     }
     return out;
   }
