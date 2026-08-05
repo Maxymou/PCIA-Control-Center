@@ -96,8 +96,8 @@ fan_control:
 # ---------------------------------------------------------------------
 # Mappage « sortie logique ↔ matériel »
 # ---------------------------------------------------------------------
-# Facultatif. Sans cette section, chaque sortie reste associée au matériel par
-# l'assistant de calibration uniquement — comportement des versions précédentes.
+# Valeurs relevées sur la machine PCIA et vérifiées dans le BIOS MSI.
+# Voir docs/FAN-MAPPING.md pour la méthode et la procédure de vérification.
 #
 # Ce que cette section fait :   désigner quel `pwmN` et quel `fanN_input`
 #                               correspondent à chaque connecteur physique.
@@ -105,43 +105,74 @@ fan_control:
 #                               pilotée par le BIOS tant que la calibration n'a
 #                               pas vérifié la sortie ET le retour au BIOS.
 #
-# Pour connaître les valeurs à écrire ici, sur la machine concernée :
+# Le contrôleur est désigné par des identifiants stables. N'écrivez JAMAIS un
+# numéro hwmon (hwmon2…) : il est attribué dans l'ordre de sondage des pilotes
+# et change d'un démarrage à l'autre.
+#
+# Pour re-vérifier sur la machine (lecture seule, aucun pwm n'est écrit) :
 #     node /opt/pcia-control-center/dist-server/server/src/cli.js discover
-# La commande est en lecture seule : elle n'écrit aucun pwm.
-#
-# N'écrivez JAMAIS un numéro hwmon (hwmon3…) comme identifiant : il est attribué
-# dans l'ordre de sondage des pilotes et change d'un démarrage à l'autre.
-# Désignez le contrôleur par `name`, `driver`, `bus`, `address` ou `key`.
-#
-# fans:
-#   mapping:
-#     CPU_FAN1:
-#       label: CPU_FAN1              # nom sérigraphié sur la carte mère
-#       controller: { name: nct6798 } # /sys/class/hwmon/hwmonN/name
-#       pwm: 1                        # pwm1
-#       tach: 1                       # fan1_input ; `null` = pas de tachymètre
-#     SYS_FAN1:
-#       label: SYS_FAN1
-#       controller: { name: nct6798 }
-#       pwm: 2
-#       tach: 2
-#     SYS_FAN2:
-#       label: SYS_FAN2
-#       controller: { name: nct6798 }
-#       pwm: 3
-#       tach: 3
-#     SYS_FAN3:                       # refroidissement Tesla V100 n°1
-#       label: SYS_FAN3
-#       controller: { name: nct6798, address: nct6775.2592 }
-#       pwm: 4
-#       tach: 4
-#     SYS_FAN4:                       # refroidissement Tesla V100 n°2
-#       label: SYS_FAN4
-#       # Variante « chemin explicite » : le segment hwmonN est neutralisé à la
-#       # résolution, seul le device sous-jacent est comparé.
-#       pwm_path: /sys/devices/platform/nct6775.2592/hwmon/hwmon2/pwm5
-#       tach_path: /sys/devices/platform/nct6775.2592/hwmon/hwmon2/fan5_input
-#
+fans:
+  mapping:
+    # Radiateur CPU — ~2350 RPM.
+    CPU_FAN1:
+      label: CPU_FAN1
+      controller_name: nct6795          # /sys/class/hwmon/hwmonN/name
+      kernel_driver: nct6775            # device/driver
+      controller_address: nct6775.2592  # adresse platform, stable
+      pwm: 2
+      tach: 2
+
+    # Boîtier ARRIÈRE (extraction) — ~820 RPM.
+    # Oui, SYS_FAN1 est l'arrière et SYS_FAN2 l'avant : c'est le câblage réel.
+    SYS_FAN1:
+      label: SYS_FAN1
+      controller_name: nct6795
+      kernel_driver: nct6775
+      controller_address: nct6775.2592
+      pwm: 3
+      tach: 3
+
+    # Boîtier AVANT (admission) — ~790 RPM.
+    # Le canal RPM est fan6_input, pas fan2_input : une déduction par numéro
+    # aurait surveillé le ventilateur du CPU à la place de celui-ci.
+    SYS_FAN2:
+      label: SYS_FAN2
+      controller_name: nct6795
+      kernel_driver: nct6775
+      controller_address: nct6775.2592
+      pwm: 6
+      tach: 6
+
+    # Tesla V100 n°1 — carte PASSIVE, ~9500 RPM.
+    SYS_FAN3:
+      label: SYS_FAN3
+      controller_name: nct6795
+      kernel_driver: nct6775
+      controller_address: nct6775.2592
+      pwm: 4
+      tach: 4
+
+    # Tesla V100 n°2 — carte PASSIVE, ~9300 RPM.
+    SYS_FAN4:
+      label: SYS_FAN4
+      controller_name: nct6795
+      kernel_driver: nct6775
+      controller_address: nct6775.2592
+      pwm: 5
+      tach: 5
+
+  # Connecteurs présents sur la carte mais volontairement non raccordés.
+  # Leur 0 RPM est une MESURE RÉELLE, pas une mesure manquante : rien n'est
+  # branché. Aucune alerte de blocage, aucune calibration, aucune consigne.
+  unconnected:
+    PUMP_FAN1:
+      label: PUMP_FAN1
+      controller_name: nct6795
+      kernel_driver: nct6775
+      controller_address: nct6775.2592
+      pwm: 1
+      tach: 1
+
 # Une entrée qui ne se résout pas est signalée dans les journaux et par la
 # commande `discover`, jamais fatale : la ventilation ne doit pas s'arrêter à
 # cause d'un fichier de configuration.

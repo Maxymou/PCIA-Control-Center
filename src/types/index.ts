@@ -291,6 +291,22 @@ export interface FanOutputState {
   severity: Severity;
 }
 
+/** Connecteur présent sur la carte mais déclaré non raccordé.
+ *
+ *  Il n'est ni piloté, ni calibrable, ni surveillé : il est seulement *connu*,
+ *  pour que l'inventaire soit complet et qu'un `0 RPM` légitime ne soit pas pris
+ *  pour un ventilateur bloqué. */
+export interface UnconnectedOutputState {
+  /** Nom du connecteur (PUMP_FAN1, AIO_PUMP…). */
+  label: string;
+  /** Sortie PWM correspondante, ou `null` si la déclaration ne résout pas. */
+  outputKey: string | null;
+  /** Vitesse relevée. `0` est une mesure réelle : rien n'est branché. */
+  rpm: number | null;
+  rpmSource: RpmSource;
+  hwmonPath: string | null;
+}
+
 // ---------- Découverte matérielle et calibration ----------
 /** Ces types décrivent ce que le moteur de ventilation observe réellement dans
  *  `/sys`. Ils sont définis ici — et non côté serveur — pour que le front-end et
@@ -464,6 +480,8 @@ export interface Snapshot {
   system?: BackendSystemStatus;
   /** État BIOS/logiciel des sorties — absent en simulation locale. */
   fanOutputs?: FanOutputState[];
+  /** Connecteurs déclarés non raccordés — absents en simulation locale. */
+  unconnectedOutputs?: UnconnectedOutputState[];
   /** Enregistrements de calibration — absents en simulation locale. */
   calibration?: CalibrationRecord[];
 }

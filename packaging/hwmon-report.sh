@@ -95,18 +95,17 @@ if [[ "$pwm_count" -eq 0 ]]; then
 
   AUCUNE SORTIE PWM N'EST EXPOSÉE PAR LE NOYAU.
 
-  Les ventilateurs sont donc pilotés exclusivement par le BIOS, et aucune
-  vitesse n'est mesurable. Ce n'est pas un défaut de PCIA Control Center :
-  le contrôleur Super-I/O de la carte mère n'a pas de pilote chargé.
+  Les ventilateurs sont alors pilotés exclusivement par le BIOS, et aucune
+  vitesse n'est mesurable. Sur la machine PCIA, ce n'est PAS l'état attendu :
+  le Super-I/O NCT6795 doit être exposé par le pilote nct6775.
 
-  Cause habituelle : le module hwmon du Super-I/O n'est pas chargé, souvent
-  parce que le BIOS réserve ses ports d'E/S via ACPI et que le noyau refuse
-  alors de les prendre.
+  Vérifier que le module est chargé, sans rien modifier :
+    lsmod | grep -E 'nct6775|nct6795'
+    sudo dmesg | grep -iE 'nct6775|nct6795'
 
-  Diagnostic complémentaire (lecture seule) :
-    sudo modprobe -n -v nct6775          # simule le chargement, n'exécute rien
-    sudo dmesg | grep -iE 'nct6775|acpi.*resource|it87'
-    sudo sensors-detect --auto           # sonde les Super-I/O connus
+  Si le module est absent, faire remonter le relevé avant toute manipulation :
+  charger un module ou modifier des options noyau n'est pas une opération à
+  décider depuis ce script.
 EOF
 fi
 

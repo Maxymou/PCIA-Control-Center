@@ -43,6 +43,7 @@ export type {
   HistoryPoint,
   RpmSource,
   SensorRef,
+  UnconnectedOutputState,
   Service,
   ServiceGroup,
   ServiceOrigin,
@@ -55,7 +56,7 @@ export type {
 import type {
   BackendCapabilities, BackendSystemStatus, CalibrationState as SharedCalibrationState,
   FanControlState as SharedFanControlState, FanCurve, FanId, FanOutputState as SharedFanOutputState,
-  CalibrationRecord, CalibrationSession, Snapshot,
+  CalibrationRecord, CalibrationSession, Snapshot, UnconnectedOutputState as SharedUnconnected,
 } from '../../src/types/index.js';
 import type { CalibrationSession as EngineCalibrationSession } from './fan/calibration.js';
 
@@ -95,6 +96,8 @@ export interface FanEngineState {
   /** Vrai si au moins une sortie est en FAILSAFE. */
   failsafe: boolean;
   outputs: FanOutputState[];
+  /** Connecteurs déclarés non raccordés : connus, jamais pilotés. */
+  unconnectedOutputs: SharedUnconnected[];
   warnings: string[];
 }
 
@@ -114,6 +117,7 @@ export type SystemStatus = BackendSystemStatus;
 export type ServerSnapshot = Snapshot & {
   system: SystemStatus;
   fanOutputs: FanOutputState[];
+  unconnectedOutputs: SharedUnconnected[];
   calibration: CalibrationRecord[];
 };
 

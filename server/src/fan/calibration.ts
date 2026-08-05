@@ -127,6 +127,17 @@ export class CalibrationController {
     if (!output) return { ok: false, error: 'Sortie PWM inconnue.' };
     if (!output.writable) return { ok: false, error: 'Sortie PWM non inscriptible : calibration impossible.' };
 
+    // Connecteur déclaré non raccordé : refusé d'emblée. La calibration fait
+    // monter la sortie à 100 % pour identifier le ventilateur — inutile et
+    // trompeur sur un connecteur dont on sait qu'il ne pilote rien.
+    const unconnectedLabel = this.deps.engine.unconnectedLabelFor(outputKey);
+    if (unconnectedLabel) {
+      return {
+        ok: false,
+        error: `${unconnectedLabel} est déclaré non branché dans la configuration : calibration refusée.`,
+      };
+    }
+
     // Une seule sortie calibrée à la fois : le RPM observé doit être attribuable.
     if ([...this.sessions.values()].some((s) => s.busy)) {
       return { ok: false, error: 'Une autre calibration est en cours.' };

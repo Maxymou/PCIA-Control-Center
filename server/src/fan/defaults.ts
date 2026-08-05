@@ -59,14 +59,18 @@ export function defaultFanConfigs(): FanConfig[] {
       sensor: { kind: 'single', source: 'cpu' }, mode: 'auto',
       manualPwm: 40, minPwm: 15, warnRpm: 300, curve: balanced.curves.CPU_FAN1,
     },
+    // SYS_FAN1 = arrière et SYS_FAN2 = avant : c'est l'inverse de ce que
+    // suggèrent les numéros, et c'est ce que le BIOS de la carte confirme.
+    // L'extraction arrière suit le CPU ; l'admission avant alimente les GPU et
+    // suit donc le plus chaud d'entre eux.
     {
-      id: 'SYS_FAN1', displayName: 'Boîtier avant', assignedHardware: 'case-front',
-      sensor: { kind: 'hottest-gpu' }, mode: 'auto',
+      id: 'SYS_FAN1', displayName: 'Boîtier arrière', assignedHardware: 'case-rear',
+      sensor: { kind: 'single', source: 'cpu' }, mode: 'auto',
       manualPwm: 40, minPwm: 15, warnRpm: 250, curve: balanced.curves.SYS_FAN1,
     },
     {
-      id: 'SYS_FAN2', displayName: 'Boîtier arrière', assignedHardware: 'case-rear',
-      sensor: { kind: 'single', source: 'cpu' }, mode: 'auto',
+      id: 'SYS_FAN2', displayName: 'Boîtier avant', assignedHardware: 'case-front',
+      sensor: { kind: 'hottest-gpu' }, mode: 'auto',
       manualPwm: 40, minPwm: 15, warnRpm: 250, curve: balanced.curves.SYS_FAN2,
     },
     {

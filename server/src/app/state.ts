@@ -329,6 +329,7 @@ export class AppState {
       markers: this.opts.repos.history.markers(from, now),
       system: this.systemStatus(engine),
       fanOutputs: engine.state?.outputs ?? [],
+      unconnectedOutputs: engine.state?.unconnectedOutputs ?? [],
       calibration: this.opts.repos.calibration.list(),
     };
 

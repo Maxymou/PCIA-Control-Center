@@ -7,8 +7,8 @@ risque.
 | Sortie logique | Connecteur | Rôle |
 |---|---|---|
 | `CPU_FAN1` | CPU_FAN1 | ventilateur du processeur |
-| `SYS_FAN1` | SYS_FAN1 | ventilateur de boîtier, avant |
-| `SYS_FAN2` | SYS_FAN2 | ventilateur de boîtier, arrière |
+| `SYS_FAN1` | SYS_FAN1 | ventilateur de boîtier, **arrière** |
+| `SYS_FAN2` | SYS_FAN2 | ventilateur de boîtier, **avant** |
 | `SYS_FAN3` | SYS_FAN3 | refroidissement Tesla V100 n°1 |
 | `SYS_FAN4` | SYS_FAN4 | refroidissement Tesla V100 n°2 |
 
@@ -31,73 +31,55 @@ surveillerait la vitesse d'un **autre** ventilateur. Une sortie réellement
 arrêtée passerait inaperçue, sur une carte passive qui n'a aucune ventilation
 propre.
 
-## 0. Prérequis : le noyau doit exposer un contrôleur de ventilation
+## 0. Matériel de la machine PCIA — relevé confirmé
 
-Si `packaging/hwmon-report.sh` annonce **0 sortie PWM**, il n'y a rien à mapper :
-le Super-I/O de la carte mère n'a pas de pilote chargé. `coretemp` et `nvme`
-donnent des températures, jamais de PWM ni de RPM — ce sont des capteurs, pas
-des contrôleurs de ventilation.
+Le contrôleur de ventilation est présent et son pilote est chargé. Aucune
+manipulation de module ni d'option noyau n'est requise.
 
-Sur les cartes MSI X299 (Super-I/O Nuvoton NCT679x), et plus généralement sur
-beaucoup de cartes récentes, la cause est presque toujours la même : le BIOS
-déclare les ports d'E/S du Super-I/O comme ressource ACPI, et le noyau refuse
-alors de les céder au pilote.
+| | Valeur relevée |
+|---|---|
+| Carte mère | MSI X299 SLI PLUS (MS-7A93) |
+| Contrôleur | Nuvoton **NCT6795** — `name` = `nct6795` |
+| Pilote noyau | `nct6775` (modules `nct6775`, `nct6775_core`) |
+| Adresse stable | `nct6775.2592` |
+| Nom lm-sensors | `nct6795-isa-0a20` |
+| Chemin observé | `/sys/devices/platform/nct6775.2592/hwmon/hwmon2` |
+| Sorties | `pwm1`…`pwm6`, tachymètres `fan1_input`…`fan6_input` |
+| `pwmN_enable` | `5` sur toutes les sorties — contrôle **BIOS** |
 
-### Diagnostic, sans rien charger
+`hwmon2` est le numéro **observé à un instant donné**. Il ne doit jamais être
+écrit dans la configuration : le mappage désigne le contrôleur par `name`,
+`driver` et `address`, qui eux ne bougent pas.
 
-```bash
-sudo modprobe -n -v nct6775            # simule : n'exécute rien
-sudo sensors-detect --auto             # sonde les Super-I/O connus
-sudo dmesg | grep -iE 'nct6775|it87|acpi.*resource'
-```
+`coretemp` et `nvme`, les deux autres contrôleurs hwmon, n'exposent que des
+températures. Ce sont des capteurs, pas des contrôleurs de ventilation.
 
-Un message du type `ACPI: OSL: Resource conflict; ACPI support missing from
-driver?` confirme le conflit ACPI.
+### Correspondance vérifiée dans le BIOS MSI
 
-### Chargement d'essai (réversible, sans redémarrage)
+| Sortie logique | Connecteur | `pwm` | `fan*_input` | Rôle | RPM constaté |
+|---|---|---|---|---|---|
+| — | PUMP_FAN1 | `pwm1` | `fan1_input` | **non branché** | 0 |
+| `CPU_FAN1` | CPU_FAN1 | `pwm2` | `fan2_input` | radiateur CPU | ~2350 |
+| `SYS_FAN1` | SYS_FAN1 | `pwm3` | `fan3_input` | boîtier **arrière** | ~820 |
+| `SYS_FAN2` | SYS_FAN2 | `pwm6` | `fan6_input` | boîtier **avant** | ~790 |
+| `SYS_FAN3` | SYS_FAN3 | `pwm4` | `fan4_input` | Tesla V100 n°1 | ~9500 |
+| `SYS_FAN4` | SYS_FAN4 | `pwm5` | `fan5_input` | Tesla V100 n°2 | ~9300 |
 
-```bash
-sudo modprobe nct6775                  # ou it87, selon sensors-detect
-ls /sys/class/hwmon/hwmon*/name | xargs -I{} sh -c 'echo -n "{} : "; cat {}'
-sensors
-```
+Deux points que ce tableau rend visibles, et qui sont exactement les pièges
+décrits plus bas :
 
-Si le module refuse de se charger pour cause de conflit ACPI :
+- `pwm1` n'est pas CPU_FAN1 ; le décalage vient du connecteur de pompe, qui
+  occupe la première sortie du Super-I/O sans rien piloter ;
+- `SYS_FAN2` est mesuré par `fan6_input`, pas par `fan2_input`. Une déduction
+  par numéro aurait surveillé le ventilateur du CPU en croyant surveiller le
+  ventilateur avant du boîtier.
 
-```bash
-sudo modprobe nct6775 acpi_enforce_resources=lax
-```
+### Le connecteur PUMP_FAN1
 
-Pour annuler l'essai : `sudo modprobe -r nct6775`.
-
-Charger ce module **n'active aucun contrôle logiciel** : il ne fait qu'exposer
-les registres du Super-I/O en lecture, et les sorties restent pilotées par le
-BIOS. PCIA Control Center n'écrit un `pwm` qu'après une calibration explicite.
-
-### Rendre le chargement permanent
-
-À ne faire qu'une fois l'essai concluant :
-
-```bash
-echo nct6775 | sudo tee /etc/modules-load.d/pcia-hwmon.conf
-```
-
-Si l'option ACPI était nécessaire, elle doit être passée au noyau au démarrage —
-c'est un paramètre global, à peser :
-
-```bash
-# /etc/default/grub : GRUB_CMDLINE_LINUX_DEFAULT="... acpi_enforce_resources=lax"
-sudo update-grub && sudo reboot
-```
-
-`acpi_enforce_resources=lax` laisse un pilote accéder à des ports que l'ACPI
-revendique. C'est la manœuvre habituelle pour lire les Super-I/O, mais elle
-lève une protection du noyau : ne l'appliquez que si le chargement simple
-échoue, et vérifiez ensuite la stabilité de la machine avant d'activer le
-moindre contrôle PWM.
-
-Après le chargement, reprendre au point 1 : le relevé montrera les `pwmN` et
-les `fanN_input`, et le mappage devient possible.
+Il est déclaré dans `fans.unconnected` : PCIA le connaît, l'affiche « Non
+branché », et n'y touche jamais. Ses `0 RPM` sont une **mesure réelle** — il n'y
+a rien de branché — pas une mesure manquante. Aucune alerte de blocage n'est
+levée, aucune calibration n'est proposée, aucune consigne n'est écrite.
 
 ## 1. Relever le matériel présent
 
@@ -139,6 +121,40 @@ Un contrôleur peut être désigné par `name`, `driver`, `bus`, `address` ou `k
 correspondre. Les chemins explicites sont acceptés — `pwm_path`, `tach_path` —
 et le segment `hwmonN` qu'ils contiennent est neutralisé à la résolution : seul
 le device sous-jacent compte, ce qui les rend insensibles à une renumérotation.
+
+Les clés plates `controller_name`, `kernel_driver` et `controller_address` sont
+équivalentes à la forme imbriquée et souvent plus lisibles quand on recopie un
+relevé :
+
+```yaml
+    CPU_FAN1:
+      controller_name: nct6795
+      kernel_driver: nct6775
+      controller_address: nct6775.2592
+      pwm: 2
+      tach: 2
+```
+
+### Connecteurs non raccordés
+
+Un connecteur présent sur la carte mais volontairement vide se déclare à part :
+
+```yaml
+fans:
+  unconnected:
+    PUMP_FAN1:
+      controller_name: nct6795
+      controller_address: nct6775.2592
+      pwm: 1
+      tach: 1
+```
+
+PCIA le connaît alors, l'affiche « Non branché », lit sa vitesse — `0 RPM`, une
+mesure exacte — et n'y touche jamais : aucune alerte de blocage, aucune
+calibration acceptée, aucune consigne écrite. Une sortie déclarée à la fois dans
+`mapping` et dans `unconnected` voit sa déclaration « non branché » écartée, avec
+un avertissement : mieux vaut surveiller un connecteur vide que cesser de
+surveiller un ventilateur réel.
 
 `tach: null` déclare explicitement qu'une sortie n'a pas de retour
 tachymétrique. Une sortie absente du mappage conserve le comportement des

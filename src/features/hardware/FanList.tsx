@@ -10,6 +10,7 @@ export function FanList() {
   const fanConfigs = useConfigStore((s) => s.fanConfigs);
   const fansLive = useLiveStore((s) => s.snap.fans);
   const hardware = useLiveStore((s) => s.snap.hardware);
+  const unconnected = useLiveStore((s) => s.snap.unconnectedOutputs);
   const ui = useUiStore();
 
   /** Matériel refroidi par une sortie, en clair. Le nom vient de l'inventaire
@@ -57,6 +58,24 @@ export function FanList() {
             </div>
           );
         })}
+
+        {/* Connecteurs présents mais non raccordés. Ils apparaissent pour que
+            l'inventaire soit complet, sans être sélectionnables : il n'y a rien
+            à régler, et leur 0 RPM est une mesure réelle. */}
+        {unconnected?.map((u) => (
+          <div key={u.label} className="fan-row is-unconnected" aria-disabled="true">
+            <div className="row">
+              <StatusDot sev="unknown" />
+              <span className="muted">Non branché</span>
+              <span className="muted small mono">{u.label}</span>
+            </div>
+            <div className="mono small muted" style={{ textAlign: 'right' }}>
+              {fmtRpmShort(u.rpm, u.rpmSource)}
+            </div>
+            <div className="small muted">Aucun ventilateur raccordé</div>
+            <div />
+          </div>
+        ))}
       </div>
     </div>
   );

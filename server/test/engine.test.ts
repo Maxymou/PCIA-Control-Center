@@ -392,10 +392,14 @@ describe('mappage déclaratif et provenance des vitesses', () => {
   function buildMappedHost(
     mapping: Record<string, unknown>,
     fanOverrides: Partial<TestEnv['config']['fanControl']> = {},
+    unconnected?: Record<string, unknown>,
   ): FanHost {
     const config = structuredClone(env.config);
     Object.assign(config.fanControl, fanOverrides);
-    config.fans = { mapping: mapping as typeof config.fans.mapping };
+    config.fans = {
+      mapping: mapping as typeof config.fans.mapping,
+      unconnected: (unconnected ?? {}) as typeof config.fans.unconnected,
+    };
     return new FanHost({
       config,
       repos: env.repos,
@@ -547,5 +551,106 @@ describe('mappage déclaratif et provenance des vitesses', () => {
     const output = outputOf(host.state(), 'CPU_FAN1');
     expect(output.mappingSource).toBe('calibration');
     expect(output.monitorOutputKey).toBe(output.boundOutputKey);
+  });
+});
+
+describe('connecteurs déclarés non raccordés', () => {
+  /** Réplique du PUMP_FAN1 de la machine : présent, jamais branché. */
+  const PUMP = { PUMP_FAN1: { label: 'PUMP_FAN1', controller: { name: 'nct6798' }, pwm: 1, tach: 1 } };
+
+  function buildHostWith(
+    unconnected: Record<string, unknown>,
+    mapping: Record<string, unknown> = {},
+  ): FanHost {
+    const config = structuredClone(env.config);
+    config.fanControl.loopIntervalMs = 200;
+    config.fans = {
+      mapping: mapping as typeof config.fans.mapping,
+      unconnected: unconnected as typeof config.fans.unconnected,
+    };
+    return new FanHost({
+      config,
+      repos: env.repos,
+      hwmon: env.hwmon,
+      mode: 'demo',
+      gpuProvider: () => env.world.gpus(),
+      withIpc: false,
+      withStateFile: false,
+    });
+  }
+
+  it('publie le connecteur sans en faire une sortie pilotée', async () => {
+    host = buildHostWith(PUMP);
+    host.start();
+    await sleep(400);
+    const state = host.state();
+    expect(state.outputs).toHaveLength(5);            // toujours cinq sorties logiques
+    expect(state.unconnectedOutputs).toHaveLength(1);
+    expect(state.unconnectedOutputs[0].label).toBe('PUMP_FAN1');
+    expect(state.unconnectedOutputs[0].outputKey).toBe(env.hwmon.outputKeyByLabel('CPU_FAN1'));
+  });
+
+  it('traite 0 RPM comme une mesure réelle, pas comme une absence', async () => {
+    env.hwmon.forceRpm('CPU_FAN1', 0);
+    host = buildHostWith(PUMP);
+    host.start();
+    await sleep(400);
+    const pump = host.state().unconnectedOutputs[0];
+    expect(pump.rpm).toBe(0);
+    expect(pump.rpmSource).not.toBe('unavailable');
+  });
+
+  it('ne lève jamais d’alerte de blocage sur un connecteur non raccordé', async () => {
+    const alerts: string[] = [];
+    const config = structuredClone(env.config);
+    config.fanControl.loopIntervalMs = 200;
+    config.fanControl.stall = { pwmThreshold: 1, delayMs: 200, consecutiveReads: 2 };
+    config.fans = { mapping: {}, unconnected: PUMP as typeof config.fans.unconnected };
+    host = new FanHost({
+      config,
+      repos: env.repos,
+      hwmon: env.hwmon,
+      mode: 'demo',
+      gpuProvider: () => env.world.gpus(),
+      withIpc: false,
+      withStateFile: false,
+      onAlert: (a) => alerts.push(a.type),
+    });
+    // 0 RPM permanent, seuil de blocage au plus bas : si une surveillance
+    // existait sur ce connecteur, elle se déclencherait forcément ici.
+    env.hwmon.forceRpm('CPU_FAN1', 0);
+    host.start();
+    await sleep(1500);
+    expect(host.state().unconnectedOutputs[0].rpm).toBe(0);
+    expect(alerts.filter((a) => a === 'FAN_STALLED')).toHaveLength(0);
+  });
+
+  it('refuse la calibration d’un connecteur déclaré non raccordé', async () => {
+    host = buildHostWith(PUMP);
+    host.start();
+    await sleep(300);
+    const outputKey = env.hwmon.outputKeyByLabel('CPU_FAN1')!;
+    const result = await host.handleCommand('calibration.start', { fanId: 'CPU_FAN1', outputKey }) as { ok: boolean; error?: string };
+    expect(result.ok).toBe(false);
+    expect(String(result.error)).toMatch(/non branché/);
+  });
+
+  it('écarte la déclaration si la sortie est aussi mappée comme pilotée', async () => {
+    // Conflit : mieux vaut surveiller un ventilateur inexistant que cesser de
+    // surveiller un ventilateur bien réel.
+    host = buildHostWith(PUMP, { CPU_FAN1: { controller: { name: 'nct6798' }, pwm: 1, tach: 1 } });
+    host.start();
+    await sleep(300);
+    const state = host.state();
+    expect(state.unconnectedOutputs[0].outputKey).toBeNull();
+    expect(state.warnings.join(' ')).toMatch(/déjà attribuée à une sortie logique/);
+    expect(outputOf(state, 'CPU_FAN1').monitorOutputKey).toBe(env.hwmon.outputKeyByLabel('CPU_FAN1'));
+  });
+
+  it('n’ajoute rien quand aucun connecteur n’est déclaré', () => {
+    calibrateAll(env);
+    host = buildHost();
+    host.start();
+    expect(host.state().unconnectedOutputs).toEqual([]);
   });
 });

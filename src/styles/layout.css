@@ -921,6 +921,16 @@
   background: var(--accent-bg);
 }
 
+/* Connecteur présent mais non raccordé : visible, jamais actionnable. */
+.fan-row.is-unconnected {
+  cursor: default;
+  opacity: 0.62;
+  border-style: dashed;
+  border-color: var(--border);
+}
+
+.fan-row.is-unconnected:hover { background: transparent; }
+
 /* Éditeur de courbe */
 .curve-editor svg {
   display: block;

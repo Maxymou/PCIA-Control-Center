@@ -20,7 +20,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SysfsHwmonBackend } from '../src/hwmon/sysfs.js';
-import { collectTachs, controllerMatches, deviceSignature, resolveFanMapping } from '../src/hwmon/mapping.js';
+import {
+  collectTachs, controllerMatchOf, controllerMatches, deviceSignature, resolveFanMapping,
+} from '../src/hwmon/mapping.js';
 import { CONFIGURABLE_FAN_IDS, configSchema, loadConfig } from '../src/config.js';
 import { FAN_IDS } from '../src/contract.js';
 
@@ -115,20 +117,31 @@ class FakeSysfs {
   }
 }
 
-/** Super-I/O type carte mère : 5 sorties, 5 tachymètres, décalés d'un cran.
+/** Réplique du Super-I/O de la machine PCIA : NCT6795 sur MSI X299 SLI PLUS.
  *
- *  Le décalage est volontaire : sur beaucoup de cartes, `pwm1` n'est *pas*
- *  associé à `fan1_input`. C'est exactement le piège que le mappage explicite
- *  doit permettre d'éviter. */
+ *  Six sorties, six tachymètres, et un décalage bien réel : `pwm1` est le
+ *  connecteur de pompe (non branché), si bien qu'aucune sortie ne porte le même
+ *  numéro que « son » rang logique. Les vitesses sont celles relevées sur la
+ *  machine. */
 const SUPERIO: FakeController = {
-  name: 'nct6798',
+  name: 'nct6795',
   device: 'platform/nct6775.2592',
   driver: 'nct6775',
   subsystem: 'platform',
-  pwm: { 1: 128, 2: 100, 3: 90, 4: 200, 5: 200 },
-  fan: { 1: '1240', 2: '780', 3: '810', 4: '2100', 5: '2050' },
+  //          PUMP  CPU   SYS1  SYS3  SYS4  SYS2
+  pwm: { 1: 0, 2: 140, 3: 90, 4: 230, 5: 230, 6: 88 },
+  fan: { 1: '0', 2: '2350', 3: '820', 4: '9500', 5: '9300', 6: '790' },
   temp: { 1: '42000', 2: '38000' },
 };
+
+/** Mappage confirmé dans le BIOS MSI, tel qu'il est livré dans config.example.yaml. */
+const PCIA_MAPPING = {
+  CPU_FAN1: { controllerName: 'nct6795', kernelDriver: 'nct6775', controllerAddress: 'nct6775.2592', pwm: 2, tach: 2 },
+  SYS_FAN1: { controllerName: 'nct6795', kernelDriver: 'nct6775', controllerAddress: 'nct6775.2592', pwm: 3, tach: 3 },
+  SYS_FAN2: { controllerName: 'nct6795', kernelDriver: 'nct6775', controllerAddress: 'nct6775.2592', pwm: 6, tach: 6 },
+  SYS_FAN3: { controllerName: 'nct6795', kernelDriver: 'nct6775', controllerAddress: 'nct6775.2592', pwm: 4, tach: 4 },
+  SYS_FAN4: { controllerName: 'nct6795', kernelDriver: 'nct6775', controllerAddress: 'nct6775.2592', pwm: 5, tach: 5 },
+} as const;
 
 const CORETEMP: FakeController = {
   name: 'coretemp',
@@ -159,17 +172,17 @@ describe('signature de chemin indépendante du numéro hwmon', () => {
 
 describe('critères d’identification d’un contrôleur', () => {
   const identity = {
-    key: 'nct6798:abc123', driverName: 'nct6798', kernelDriver: 'nct6775',
+    key: 'nct6798:abc123', driverName: 'nct6795', kernelDriver: 'nct6775',
     bus: 'platform', address: 'nct6775.2592', modalias: null, currentPath: '/sys/class/hwmon/hwmon3',
   };
 
   it('accepte un critère unique, insensible à la casse', () => {
-    expect(controllerMatches(identity, { name: 'NCT6798' })).toBe(true);
+    expect(controllerMatches(identity, { name: 'NCT6795' })).toBe(true);
     expect(controllerMatches(identity, { address: 'nct6775.2592' })).toBe(true);
   });
 
   it('exige que tous les critères fournis correspondent', () => {
-    expect(controllerMatches(identity, { name: 'nct6798', address: 'it87.552' })).toBe(false);
+    expect(controllerMatches(identity, { name: 'nct6795', address: 'it87.552' })).toBe(false);
     expect(controllerMatches(identity, { name: 'it8686' })).toBe(false);
   });
 });
@@ -193,16 +206,16 @@ describe('mappage sur une arborescence sysfs factice', () => {
 
   afterEach(() => sysfs.cleanup());
 
-  it('découvre les cinq sorties du Super-I/O', () => {
+  it('découvre les six sorties du Super-I/O', () => {
     const discovery = discover();
-    expect(discovery.pwmOutputs).toHaveLength(5);
-    expect(discovery.controllers.map((c) => c.driverName).sort()).toEqual(['coretemp', 'nct6798']);
+    expect(discovery.pwmOutputs).toHaveLength(6);
+    expect(discovery.controllers.map((c) => c.driverName).sort()).toEqual(['coretemp', 'nct6795']);
   });
 
   it('résout le mappage par nom de contrôleur et index', () => {
     discover();
     const resolved = resolveFanMapping(
-      { CPU_FAN1: { controller: { name: 'nct6798' }, pwm: 1, tach: 1 } },
+      { CPU_FAN1: { controller: { name: 'nct6795' }, pwm: 1, tach: 1 } },
       backend.cached(), tachs(),
     );
     const cpu = resolved.get('CPU_FAN1')!;
@@ -229,7 +242,7 @@ describe('mappage sur une arborescence sysfs factice', () => {
     discover();
     const before = resolveFanMapping(
       {
-        CPU_FAN1: { controller: { name: 'nct6798' }, pwm: 1, tach: 1 },
+        CPU_FAN1: { controller: { name: 'nct6795' }, pwm: 1, tach: 1 },
         SYS_FAN4: { pwmPath: join(sysfs.classRoot, 'hwmon1', 'pwm5'), tach: 5 },
       },
       backend.cached(), tachs(),
@@ -241,7 +254,7 @@ describe('mappage sur une arborescence sysfs factice', () => {
     discover();
     const after = resolveFanMapping(
       {
-        CPU_FAN1: { controller: { name: 'nct6798' }, pwm: 1, tach: 1 },
+        CPU_FAN1: { controller: { name: 'nct6795' }, pwm: 1, tach: 1 },
         // Le chemin écrit dans config.yaml contient toujours l'ancien numéro.
         SYS_FAN4: { pwmPath: join(sysfs.classRoot, 'hwmon1', 'pwm5'), tach: 5 },
       },
@@ -281,18 +294,18 @@ describe('mappage sur une arborescence sysfs factice', () => {
     // Sur cette carte factice, pwm2 est refroidi par le ventilateur dont le
     // tachymètre est fan3_input : c'est tout l'objet du mappage explicite.
     const resolved = resolveFanMapping(
-      { SYS_FAN1: { controller: { name: 'nct6798' }, pwm: 2, tach: 3 } },
+      { SYS_FAN2: { controller: { name: 'nct6795' }, pwm: 6, tach: 6 } },
       backend.cached(), tachs(),
     );
-    const key = resolved.get('SYS_FAN1')!;
+    const key = resolved.get('SYS_FAN2')!;
     backend.bindTach(key.outputKey!, key.tachKey!);
-    expect(backend.readRpm(key.outputKey!)).toBe(810);   // fan3_input, pas fan2_input
+    expect(backend.readRpm(key.outputKey!)).toBe(790);   // fan6_input, pas fan2_input
   });
 
   it('signale un canal RPM inexistant sans inventer de valeur', () => {
     discover();
     const resolved = resolveFanMapping(
-      { SYS_FAN1: { controller: { name: 'nct6798' }, pwm: 2, tach: 9 } },
+      { SYS_FAN1: { controller: { name: 'nct6795' }, pwm: 2, tach: 9 } },
       backend.cached(), tachs(),
     );
     const entry = resolved.get('SYS_FAN1')!;
@@ -307,7 +320,7 @@ describe('mappage sur une arborescence sysfs factice', () => {
   it('accepte une déclaration explicite « pas de tachymètre »', () => {
     discover();
     const resolved = resolveFanMapping(
-      { SYS_FAN2: { controller: { name: 'nct6798' }, pwm: 3, tach: null } },
+      { SYS_FAN2: { controller: { name: 'nct6795' }, pwm: 3, tach: null } },
       backend.cached(), tachs(),
     );
     const entry = resolved.get('SYS_FAN2')!;
@@ -319,8 +332,8 @@ describe('mappage sur une arborescence sysfs factice', () => {
     discover();
     const resolved = resolveFanMapping(
       {
-        SYS_FAN3: { controller: { name: 'nct6798' }, pwm: 4 },
-        SYS_FAN4: { controller: { name: 'nct6798' }, pwm: 4 },
+        SYS_FAN3: { controller: { name: 'nct6795' }, pwm: 4 },
+        SYS_FAN4: { controller: { name: 'nct6795' }, pwm: 4 },
       },
       backend.cached(), tachs(),
     );
@@ -332,11 +345,11 @@ describe('mappage sur une arborescence sysfs factice', () => {
   it('signale une désignation ambiguë au lieu de choisir au hasard', () => {
     discover();
     const resolved = resolveFanMapping(
-      { CPU_FAN1: { controller: { name: 'nct6798' } } },   // 5 sorties correspondent
+      { CPU_FAN1: { controller: { name: 'nct6795' } } },   // 5 sorties correspondent
       backend.cached(), tachs(),
     );
     expect(resolved.get('CPU_FAN1')!.outputKey).toBeNull();
-    expect(resolved.get('CPU_FAN1')!.warnings.join(' ')).toMatch(/5 sorties/);
+    expect(resolved.get('CPU_FAN1')!.warnings.join(' ')).toMatch(/6 sorties/);
   });
 
   it('signale un contrôleur absent sans se rabattre sur un autre', () => {
@@ -347,6 +360,117 @@ describe('mappage sur une arborescence sysfs factice', () => {
     );
     expect(resolved.get('CPU_FAN1')!.outputKey).toBeNull();
     expect(resolved.get('CPU_FAN1')!.unresolved).toBe(true);
+  });
+});
+
+describe('mappage confirmé de la machine PCIA', () => {
+  let sysfs: FakeSysfs;
+  let backend: SysfsHwmonBackend;
+
+  const discover = () => {
+    backend = new SysfsHwmonBackend({ root: sysfs.classRoot, allowWrites: false });
+    backend.discover();
+  };
+  const tachs = () => collectTachs(backend.cached(), (k) => backend.tachKeysForController(k));
+
+  beforeEach(() => {
+    sysfs = new FakeSysfs();
+    sysfs.add(CORETEMP, 0);
+    sysfs.add(SUPERIO, 2);   // hwmon2, comme sur la machine
+    discover();
+  });
+  afterEach(() => sysfs.cleanup());
+
+  /** Vitesses attendues, connecteur par connecteur. */
+  const EXPECTED: Record<string, { pwm: number; rpm: number }> = {
+    CPU_FAN1: { pwm: 2, rpm: 2350 },
+    SYS_FAN1: { pwm: 3, rpm: 820 },
+    SYS_FAN2: { pwm: 6, rpm: 790 },
+    SYS_FAN3: { pwm: 4, rpm: 9500 },
+    SYS_FAN4: { pwm: 5, rpm: 9300 },
+  };
+
+  it('résout les cinq sorties sur le bon pwm et le bon canal RPM', () => {
+    const resolved = resolveFanMapping(PCIA_MAPPING, backend.cached(), tachs());
+    for (const [fanId, expected] of Object.entries(EXPECTED)) {
+      const entry = resolved.get(fanId as keyof typeof PCIA_MAPPING)!;
+      expect(entry.unresolved, fanId).toBe(false);
+      expect(entry.warnings, fanId).toEqual([]);
+      expect(backend.getOutput(entry.outputKey!)!.index, fanId).toBe(expected.pwm);
+      backend.bindTach(entry.outputKey!, entry.tachKey!);
+      expect(backend.readRpm(entry.outputKey!), fanId).toBe(expected.rpm);
+    }
+  });
+
+  it('n’attribue pas SYS_FAN2 au canal fan2 — le piège du numéro', () => {
+    const resolved = resolveFanMapping(PCIA_MAPPING, backend.cached(), tachs());
+    const sysFan2 = resolved.get('SYS_FAN2')!;
+    expect(sysFan2.tachKey).toContain('#fan6');
+    // fan2_input, c'est le CPU : s'en servir pour SYS_FAN2 masquerait un arrêt
+    // du ventilateur avant tant que le ventilateur du CPU tourne.
+    expect(sysFan2.tachKey).not.toContain('#fan2');
+  });
+
+  it('laisse pwm1 (PUMP_FAN1) hors des sorties pilotées', () => {
+    const resolved = resolveFanMapping(PCIA_MAPPING, backend.cached(), tachs());
+    const usedIndexes = [...resolved.values()]
+      .map((m) => backend.getOutput(m.outputKey!)!.index)
+      .sort((a, b) => a - b);
+    expect(usedIndexes).toEqual([2, 3, 4, 5, 6]);
+  });
+
+  it('accepte les clés plates controller_name / kernel_driver / controller_address', () => {
+    const parsed = configSchema.parse({ fans: { mapping: PCIA_MAPPING } });
+    const resolved = resolveFanMapping(parsed.fans.mapping, backend.cached(), tachs());
+    expect(resolved.get('CPU_FAN1')!.unresolved).toBe(false);
+    // Les alias plats produisent les mêmes critères que la forme imbriquée.
+    expect(controllerMatchOf(parsed.fans.mapping.CPU_FAN1!)).toMatchObject({
+      name: 'nct6795', driver: 'nct6775', address: 'nct6775.2592',
+    });
+    expect(controllerMatchOf({ controller: { name: 'nct6795' } })).toMatchObject({ name: 'nct6795' });
+  });
+
+  it('survit à une renumérotation hwmon2 → hwmon5', () => {
+    const before = resolveFanMapping(PCIA_MAPPING, backend.cached(), tachs());
+    const keysBefore = [...before.values()].map((m) => m.outputKey);
+
+    sysfs.renumber(2, 5);
+    discover();
+
+    const after = resolveFanMapping(PCIA_MAPPING, backend.cached(), tachs());
+    expect([...after.values()].map((m) => m.outputKey)).toEqual(keysBefore);
+    expect([...after.values()].every((m) => !m.unresolved)).toBe(true);
+  });
+
+  it('refuse le mappage si le contrôleur est remplacé par un autre modèle', () => {
+    const other = { ...SUPERIO, name: 'nct6798', device: 'platform/nct6775.664' };
+    sysfs.cleanup();
+    sysfs = new FakeSysfs();
+    sysfs.add(other, 2);
+    discover();
+    const resolved = resolveFanMapping(PCIA_MAPPING, backend.cached(), tachs());
+    expect([...resolved.values()].every((m) => m.unresolved)).toBe(true);
+  });
+
+  it('déclare PUMP_FAN1 comme connecteur non raccordé', () => {
+    const parsed = configSchema.parse({
+      fans: {
+        mapping: PCIA_MAPPING,
+        unconnected: {
+          PUMP_FAN1: {
+            controllerName: 'nct6795', kernelDriver: 'nct6775',
+            controllerAddress: 'nct6775.2592', pwm: 1, tach: 1,
+          },
+        },
+      },
+    });
+    const resolved = resolveFanMapping<string>(parsed.fans.unconnected, backend.cached(), tachs());
+    const pump = resolved.get('PUMP_FAN1')!;
+    expect(pump.unresolved).toBe(false);
+    expect(backend.getOutput(pump.outputKey!)!.index).toBe(1);
+    backend.bindTach(pump.outputKey!, pump.tachKey!);
+    // 0 RPM mesuré : rien n'est branché, et c'est une information exacte.
+    expect(backend.readRpm(pump.outputKey!)).toBe(0);
   });
 });
 
@@ -362,35 +486,46 @@ describe('lecture RPM dégradée', () => {
   });
   afterEach(() => sysfs.cleanup());
 
+  /** CPU_FAN1 = pwm2 / fan2_input sur cette carte. */
   const cpuKey = () => {
     const tach = collectTachs(backend.cached(), (k) => backend.tachKeysForController(k))
-      .find((t) => t.index === 1)!;
-    const output = backend.cached().pwmOutputs.find((o) => o.index === 1)!;
+      .find((t) => t.index === 2)!;
+    const output = backend.cached().pwmOutputs.find((o) => o.index === 2)!;
     backend.bindTach(output.key, tach.key);
     return output.key;
   };
 
   it('lit une vitesse réelle', () => {
-    expect(backend.readRpm(cpuKey())).toBe(1240);
+    expect(backend.readRpm(cpuKey())).toBe(2350);
   });
 
   it('renvoie null sur une valeur non numérique, pas 0', () => {
     const key = cpuKey();
-    sysfs.writeRaw(1, 'fan1_input', 'n/a\n');
+    sysfs.writeRaw(1, 'fan2_input', 'n/a\n');
     expect(backend.readRpm(key)).toBeNull();
   });
 
   it('renvoie null quand le fichier disparaît, pas 0', () => {
     const key = cpuKey();
-    sysfs.removeFile(1, 'fan1_input');
+    sysfs.removeFile(1, 'fan2_input');
     expect(backend.readRpm(key)).toBeNull();
   });
 
   it('distingue un ventilateur réellement arrêté d’une mesure absente', () => {
     const key = cpuKey();
-    sysfs.writeRaw(1, 'fan1_input', '0\n');
+    sysfs.writeRaw(1, 'fan2_input', '0\n');
     // 0 est une mesure valide : le ventilateur est à l'arrêt.
     expect(backend.readRpm(key)).toBe(0);
+  });
+
+  it('lit 0 RPM sur le connecteur de pompe non branché — c’est une mesure', () => {
+    // PUMP_FAN1 = pwm1 / fan1_input, rien de raccordé. Le 0 vient du matériel,
+    // il ne doit surtout pas être confondu avec une mesure indisponible.
+    const tach = collectTachs(backend.cached(), (k) => backend.tachKeysForController(k))
+      .find((t) => t.index === 1)!;
+    const output = backend.cached().pwmOutputs.find((o) => o.index === 1)!;
+    backend.bindTach(output.key, tach.key);
+    expect(backend.readRpm(output.key)).toBe(0);
   });
 });
 
@@ -442,7 +577,7 @@ describe('compatibilité des configurations', () => {
 
   it('refuse une sortie logique inconnue', () => {
     const result = configSchema.safeParse({
-      fans: { mapping: { SYS_FAN9: { controller: { name: 'nct6798' }, pwm: 1 } } },
+      fans: { mapping: { SYS_FAN9: { controller: { name: 'nct6795' }, pwm: 1 } } },
     });
     expect(result.success).toBe(false);
   });

@@ -136,11 +136,22 @@ const controllerMatchSchema = z.object({
 
 export type ControllerMatch = z.infer<typeof controllerMatchSchema>;
 
-/** Description d'une sortie logique : quel PWM, quel canal RPM. */
+/** Description d'une sortie : quel PWM, quel canal RPM.
+ *
+ *  Le contrôleur peut être décrit de deux façons équivalentes — la forme
+ *  imbriquée `controller: { … }`, ou les clés plates `controller_name`,
+ *  `kernel_driver`, `controller_address`, plus lisibles dans un relevé. Les
+ *  secondes sont repliées dans la première par `controllerMatchOf`
+ *  (hwmon/mapping.ts), qui est le seul endroit où ce repliage a lieu. */
 const fanMappingEntrySchema = z.object({
   /** Nom du connecteur physique tel qu'il est sérigraphié sur la carte mère. */
   label: z.string().min(1).max(60).optional(),
   controller: controllerMatchSchema.optional(),
+  /** Alias plats. `controller_name: nct6795` équivaut à `controller: { name: nct6795 }`. */
+  controllerName: z.string().min(1).optional(),
+  kernelDriver: z.string().min(1).optional(),
+  controllerAddress: z.string().min(1).optional(),
+  controllerBus: z.string().min(1).optional(),
   /** Index de la sortie (`pwm3` → 3). Sans valeur de `controller`, ignoré. */
   pwm: z.number().int().min(0).max(31).optional(),
   /** Index du tachymètre (`fan2_input` → 2). `null` = pas de retour RPM.
@@ -152,8 +163,12 @@ const fanMappingEntrySchema = z.object({
   /** Chemin explicite vers le fichier fanN_input. */
   tachPath: z.string().min(1).optional(),
 }).refine(
-  (e) => Boolean(e.controller || e.pwmPath),
-  { message: 'préciser `controller` (avec `pwm`) ou `pwm_path`' },
+  // Le repliage des alias plats dans `controller` est fait une seule fois, dans
+  // `hwmon/mapping.ts` (`controllerMatchOf`) : le schéma se contente de vérifier
+  // qu'au moins une désignation est fournie.
+  (e) => Boolean(e.controller || e.controllerName || e.kernelDriver
+    || e.controllerAddress || e.controllerBus || e.pwmPath),
+  { message: 'préciser `controller` (ou controller_name / kernel_driver / controller_address) avec `pwm`, ou `pwm_path`' },
 );
 
 export type FanMappingEntry = z.infer<typeof fanMappingEntrySchema>;
@@ -167,6 +182,17 @@ const fansSchema = z.object({
   /** Mappage déclaratif. Toute sortie absente conserve le comportement
    *  historique : liaison établie par l'assistant de calibration uniquement. */
   mapping: z.partialRecord(z.enum(CONFIGURABLE_FAN_IDS), fanMappingEntrySchema).default({}),
+  /** Connecteurs présents sur la carte mais **volontairement non raccordés**.
+   *
+   *  Les déclarer sert à trois choses, toutes de sécurité :
+   *   - leurs `0 RPM` sont reconnus comme une mesure réelle et non comme une
+   *     mesure manquante — il n'y a rien de branché, c'est normal ;
+   *   - aucune alerte de blocage n'est levée sur eux ;
+   *   - la calibration les refuse : on ne lance pas un palier à 100 % sur un
+   *     connecteur dont on sait qu'il ne pilote rien.
+   *
+   *  La clé est le nom du connecteur (PUMP_FAN1, AIO_PUMP…). */
+  unconnected: z.record(z.string().min(1).max(60), fanMappingEntrySchema).default({}),
 });
 
 const alertsSchema = z.object({
@@ -232,6 +258,7 @@ const DEFAULT_CONFIG_PATHS = [
 const IDENTIFIER_KEY_PATHS = new Set([
   'alerts.temperatureThresholds',
   'fans.mapping',
+  'fans.unconnected',
 ]);
 
 /** Accepte les clés YAML en snake_case comme en camelCase. */

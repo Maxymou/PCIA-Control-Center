@@ -16,14 +16,16 @@
 import type { AppConfig } from '../config.js';
 import type {
   CalibrationRecord, FanConfig, FanControlState, FanCurve, FanEngineState, FanId,
-  FanOutputState, HardwareId, RpmSource, Severity,
+  FanOutputState, HardwareId, RpmSource, Severity, UnconnectedOutputState,
 } from '../contract.js';
 import { FAN_IDS } from '../contract.js';
 import type { Repositories } from '../db/repositories.js';
 import { createLogger } from '../logger.js';
 import type { HwmonBackend } from '../hwmon/backend.js';
 import { HwmonError } from '../hwmon/backend.js';
-import { collectTachs, resolveFanMapping, type ResolvedFanMapping } from '../hwmon/mapping.js';
+import {
+  collectTachs, resolveFanMapping, type ResolvedFanMapping, type ResolvedUnconnected,
+} from '../hwmon/mapping.js';
 import { readSystemInfo } from '../system/info.js';
 import { evalCurve, validateCurve } from './curve.js';
 import { effectiveMinPwm, PASSIVE_COOLING_FANS } from './defaults.js';
@@ -121,6 +123,8 @@ export class FanEngine {
   private lastHeartbeat = 0;
   /** Mappage déclaratif résolu contre la découverte courante. */
   private mapping = new Map<FanId, ResolvedFanMapping>();
+  /** Connecteurs déclarés non raccordés — lus, jamais écrits. */
+  private unconnected: ResolvedUnconnected[] = [];
   private mappingWarnings: string[] = [];
 
   constructor(private deps: EngineDeps) {}
@@ -190,13 +194,19 @@ export class FanEngine {
    *  quel canal, rien de plus. */
   private applyDeclaredMapping(): void {
     const declared = this.deps.config.fans.mapping;
+    const declaredUnconnected = this.deps.config.fans.unconnected;
     this.mapping = new Map();
+    this.unconnected = [];
     this.mappingWarnings = [];
-    if (!declared || Object.keys(declared).length === 0) return;
+
+    const hasMapping = declared && Object.keys(declared).length > 0;
+    const hasUnconnected = declaredUnconnected && Object.keys(declaredUnconnected).length > 0;
+    if (!hasMapping && !hasUnconnected) return;
 
     const discovery = this.deps.hwmon.cached();
     const tachs = collectTachs(discovery, (key) => this.deps.hwmon.tachKeysForController(key));
-    this.mapping = resolveFanMapping(declared, discovery, tachs);
+
+    if (hasMapping) this.mapping = resolveFanMapping(declared, discovery, tachs);
 
     for (const resolved of this.mapping.values()) {
       for (const w of resolved.warnings) {
@@ -209,6 +219,61 @@ export class FanEngine {
         this.deps.hwmon.bindTach(resolved.outputKey, resolved.tachKey);
       }
     }
+
+    if (!hasUnconnected) return;
+    this.unconnected = [...resolveFanMapping<string>(declaredUnconnected, discovery, tachs).values()];
+    const controlled = new Set(
+      [...this.mapping.values()].map((m) => m.outputKey).filter((k): k is string => k !== null),
+    );
+    for (const entry of this.unconnected) {
+      for (const w of entry.warnings) {
+        this.mappingWarnings.push(w);
+        log.throttled(`unconnected-${w}`, 600_000, 'warn', w);
+      }
+      // Garde-fou : une sortie ne peut pas être à la fois pilotée et déclarée
+      // non branchée. En cas de conflit, la déclaration « non branché » est
+      // écartée — sinon on cesserait de surveiller un ventilateur bien réel.
+      if (entry.outputKey && controlled.has(entry.outputKey)) {
+        const w = `${entry.fanId} : la sortie ${entry.outputKey} est déjà attribuée à une sortie logique `
+          + '— déclaration « non branché » ignorée.';
+        this.mappingWarnings.push(w);
+        log.warn(w);
+        entry.outputKey = null;
+        entry.unresolved = true;
+        continue;
+      }
+      if (entry.outputKey && entry.tachKey !== undefined) {
+        this.deps.hwmon.bindTach(entry.outputKey, entry.tachKey);
+      }
+    }
+  }
+
+  /** Sorties PWM déclarées non raccordées — la calibration doit les refuser. */
+  unconnectedOutputKeys(): Set<string> {
+    return new Set(this.unconnected.map((u) => u.outputKey).filter((k): k is string => k !== null));
+  }
+
+  /** Nom du connecteur déclaré non raccordé pour une sortie donnée. */
+  unconnectedLabelFor(outputKey: string): string | null {
+    return this.unconnected.find((u) => u.outputKey === outputKey)?.fanId ?? null;
+  }
+
+  private unconnectedState(): UnconnectedOutputState[] {
+    return this.unconnected.map((u): UnconnectedOutputState => {
+      // Lecture normale : sur un connecteur vide, 0 RPM est la bonne réponse et
+      // c'est une **mesure**, pas une absence de mesure.
+      const raw = u.outputKey ? this.deps.hwmon.readRpm(u.outputKey) : null;
+      const valid = raw !== null && Number.isFinite(raw) && raw >= 0;
+      return {
+        label: u.connectorLabel ?? u.fanId,
+        outputKey: u.outputKey,
+        rpm: valid ? raw : null,
+        rpmSource: !valid
+          ? 'unavailable'
+          : this.deps.hwmon.kind === 'simulated' ? 'simulated' : 'measured',
+        hwmonPath: u.outputKey ? this.deps.hwmon.getOutput(u.outputKey)?.pwmPath ?? null : null,
+      };
+    });
   }
 
   // =====================================================================
@@ -939,6 +1004,7 @@ export class FanEngine {
       mode: this.deps.mode,
       loopIntervalMs: this.deps.config.fanControl.loopIntervalMs,
       failsafe: [...this.outputs.values()].some((o) => o.controlState === 'FAILSAFE'),
+      unconnectedOutputs: this.unconnectedState(),
       outputs: [...this.outputs.values()].map((o): FanOutputState => ({
         id: o.id,
         controlState: o.controlState,

@@ -135,19 +135,43 @@ curl -s http://127.0.0.1:4322/api/snapshot | head -c 400
 
 Puis `Ctrl+C`. Le service en production n'a pas bougé pendant cet essai.
 
-## 6. Attribution des ventilateurs (facultatif, mais conseillé)
+## 6. Attribution des ventilateurs — à ne pas oublier
 
-Avant la bascule, relever le matériel et compléter `fans.mapping` :
+`install.sh` **n'écrase jamais** un `config.yaml` existant. Le mappage livré
+avec cette version arrive donc dans `/etc/pcia-control-center/config.example.yaml`
+et **pas** dans la configuration active : il faut le recopier à la main.
 
 ```bash
 bash "/opt/pcia-control-center-src-$STAMP/packaging/hwmon-report.sh" \
   > "/root/pcia-hwmon-$STAMP.txt"
+
+# Reporter la section `fans:` du modèle dans la configuration active.
+sudo diff -u /etc/pcia-control-center/config.yaml \
+             /etc/pcia-control-center/config.example.yaml | head -80
 sudoedit /etc/pcia-control-center/config.yaml
 ```
 
-Voir `docs/FAN-MAPPING.md` pour la syntaxe et la procédure de vérification. Une
-configuration laissée telle quelle reste valide : le comportement est celui des
-versions précédentes.
+Vérifier ensuite que les six canaux sont bien résolus :
+
+```bash
+sudo -u pcia node /opt/pcia-control-center/dist-server/server/src/cli.js discover \
+  | sed -n '/Mappage déclaré/,$p'
+```
+
+Sans cette section, le comportement reste celui des versions précédentes : les
+liaisons ne viennent que de la calibration, et aucune sortie n'est associée tant
+qu'elle n'a pas été calibrée.
+
+### Le sens avant/arrière change
+
+Les valeurs par défaut de `SYS_FAN1` et `SYS_FAN2` ont été corrigées d'après le
+BIOS : `SYS_FAN1` est le ventilateur **arrière**, `SYS_FAN2` l'**avant**. Ces
+libellés ne sont semés en base qu'à la **première** installation : sur une
+machine déjà en service, la base conserve les anciennes valeurs inversées.
+
+Après la bascule, corriger dans l'interface — section Ventilation, pour chacune
+des deux sorties : nom affiché, matériel attribué (`case-rear` / `case-front`) et
+capteur de référence (CPU pour l'arrière, GPU le plus chaud pour l'avant).
 
 ## 7. Bascule
 

@@ -197,6 +197,19 @@ async function main(): Promise<void> {
               + (m.warnings.length ? `\n${m.warnings.map((w) => `    ! ${w}`).join('\n')}` : ''),
           )
           : ['  (aucun — les liaisons viennent uniquement de la calibration)']),
+        '',
+        'Connecteurs déclarés non raccordés :',
+        ...(Object.keys(config.fans.unconnected).length
+          ? [...resolveFanMapping<string>(
+            config.fans.unconnected,
+            discovery,
+            collectTachs(discovery, (key) => env.hwmon.tachKeysForController(key)),
+          ).values()].map(
+            (m) => `  ${m.fanId.padEnd(12)} ${m.outputKey ?? 'NON RÉSOLU'}`
+              + `${m.tachKey === undefined ? '' : `  rpm=${m.tachKey ?? 'aucun'}`}`
+              + (m.warnings.length ? `\n${m.warnings.map((w) => `    ! ${w}`).join('\n')}` : ''),
+          )
+          : ['  (aucun)']),
         ...(discovery.warnings.length ? ['', 'Avertissements :', ...discovery.warnings.map((w) => `  ! ${w}`)] : []),
       ].join('\n'));
       break;

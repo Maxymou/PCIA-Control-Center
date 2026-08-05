@@ -31,8 +31,9 @@ export interface TachCandidate {
 /** Origine de la liaison retenue pour une sortie logique. */
 export type MappingSource = 'config' | 'calibration' | 'none';
 
-export interface ResolvedFanMapping {
-  fanId: FanId;
+export interface ResolvedEntry<K extends string = string> {
+  /** Clé déclarée : identifiant de sortie logique, ou nom de connecteur. */
+  fanId: K;
   /** Sortie PWM désignée par la configuration, ou `null` si non résolue. */
   outputKey: string | null;
   /** Canal RPM imposé : clé de tachymètre, `null` = « aucun » explicite,
@@ -44,6 +45,12 @@ export interface ResolvedFanMapping {
   unresolved: boolean;
   warnings: string[];
 }
+
+/** Résolution d'une sortie logique (CPU_FAN1…SYS_FAN4). */
+export type ResolvedFanMapping = ResolvedEntry<FanId>;
+
+/** Résolution d'un connecteur déclaré non raccordé (PUMP_FAN1…). */
+export type ResolvedUnconnected = ResolvedEntry<string>;
 
 export interface ResolveOptions {
   /** Résolution des liens symboliques. Injectable pour les tests. */
@@ -88,13 +95,32 @@ export function controllerMatches(identity: ControllerIdentity, match: Controlle
     && eq(match.address, identity.address);
 }
 
-function resolveOne(
-  fanId: FanId,
+/** Critères d'identification effectifs d'une entrée.
+ *
+ *  Deux écritures équivalentes sont acceptées dans config.yaml : la forme
+ *  imbriquée `controller: { name, driver, address }` et les clés plates
+ *  `controller_name`, `kernel_driver`, `controller_address`. Le repliage se
+ *  fait ici, et **seulement ici** — c'est ce qui garantit que les deux formes
+ *  ne peuvent pas diverger avec le temps. La forme imbriquée l'emporte si les
+ *  deux sont présentes. */
+export function controllerMatchOf(entry: FanMappingEntry): ControllerMatch | null {
+  const flat: ControllerMatch = {
+    name: entry.controllerName,
+    driver: entry.kernelDriver,
+    address: entry.controllerAddress,
+    bus: entry.controllerBus,
+  };
+  const merged: ControllerMatch = { ...flat, ...(entry.controller ?? {}) };
+  return Object.values(merged).some((v) => v !== undefined) ? merged : null;
+}
+
+function resolveOne<K extends string>(
+  fanId: K,
   entry: FanMappingEntry,
   discovery: HwmonDiscovery,
   tachs: TachCandidate[],
   opts: ResolveOptions,
-): ResolvedFanMapping {
+): ResolvedEntry<K> {
   const warnings: string[] = [];
   const label = entry.label ?? null;
   const outputs = discovery.pwmOutputs;
@@ -109,13 +135,14 @@ function resolveOne(
     } else {
       warnings.push(`${fanId} : le chemin ${entry.pwmPath} désigne ${hits.length} sorties — mappage ignoré.`);
     }
-  } else if (entry.controller) {
-    let candidates = outputs.filter((o) => controllerMatches(o.controller, entry.controller!));
+  } else if (controllerMatchOf(entry)) {
+    const match = controllerMatchOf(entry)!;
+    let candidates = outputs.filter((o) => controllerMatches(o.controller, match));
     if (entry.pwm !== undefined) candidates = candidates.filter((o) => o.index === entry.pwm);
     if (candidates.length === 1) matched = candidates[0];
     else if (candidates.length === 0) {
       warnings.push(
-        `${fanId} : aucune sortie PWM ne correspond aux critères (${describeMatch(entry.controller)}`
+        `${fanId} : aucune sortie PWM ne correspond aux critères (${describeMatch(match)}`
         + `${entry.pwm !== undefined ? `, pwm${entry.pwm}` : ''}).`,
       );
     } else {
@@ -164,16 +191,16 @@ function describeMatch(match: ControllerMatch): string {
 
 /** Résout tout le mappage déclaré. Les sorties absentes de la configuration ne
  *  produisent aucune entrée : leur comportement historique est inchangé. */
-export function resolveFanMapping(
-  mapping: Partial<Record<FanId, FanMappingEntry>>,
+export function resolveFanMapping<K extends string = FanId>(
+  mapping: Partial<Record<K, FanMappingEntry>>,
   discovery: HwmonDiscovery,
   tachs: TachCandidate[],
   opts: ResolveOptions = {},
-): Map<FanId, ResolvedFanMapping> {
-  const out = new Map<FanId, ResolvedFanMapping>();
-  const usedOutputs = new Map<string, FanId>();
+): Map<K, ResolvedEntry<K>> {
+  const out = new Map<K, ResolvedEntry<K>>();
+  const usedOutputs = new Map<string, K>();
 
-  for (const [id, entry] of Object.entries(mapping) as [FanId, FanMappingEntry][]) {
+  for (const [id, entry] of Object.entries(mapping) as [K, FanMappingEntry][]) {
     if (!entry) continue;
     const resolved = resolveOne(id, entry, discovery, tachs, opts);
     if (resolved.outputKey) {
