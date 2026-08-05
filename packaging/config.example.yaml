@@ -93,6 +93,59 @@ fan_control:
   # systemd standard (le script d'installation ne modifie jamais votre config).
   embedded: never
 
+# ---------------------------------------------------------------------
+# Mappage « sortie logique ↔ matériel »
+# ---------------------------------------------------------------------
+# Facultatif. Sans cette section, chaque sortie reste associée au matériel par
+# l'assistant de calibration uniquement — comportement des versions précédentes.
+#
+# Ce que cette section fait :   désigner quel `pwmN` et quel `fanN_input`
+#                               correspondent à chaque connecteur physique.
+# Ce qu'elle ne fait PAS :      autoriser le contrôle logiciel. Une sortie reste
+#                               pilotée par le BIOS tant que la calibration n'a
+#                               pas vérifié la sortie ET le retour au BIOS.
+#
+# Pour connaître les valeurs à écrire ici, sur la machine concernée :
+#     node /opt/pcia-control-center/dist-server/server/src/cli.js discover
+# La commande est en lecture seule : elle n'écrit aucun pwm.
+#
+# N'écrivez JAMAIS un numéro hwmon (hwmon3…) comme identifiant : il est attribué
+# dans l'ordre de sondage des pilotes et change d'un démarrage à l'autre.
+# Désignez le contrôleur par `name`, `driver`, `bus`, `address` ou `key`.
+#
+# fans:
+#   mapping:
+#     CPU_FAN1:
+#       label: CPU_FAN1              # nom sérigraphié sur la carte mère
+#       controller: { name: nct6798 } # /sys/class/hwmon/hwmonN/name
+#       pwm: 1                        # pwm1
+#       tach: 1                       # fan1_input ; `null` = pas de tachymètre
+#     SYS_FAN1:
+#       label: SYS_FAN1
+#       controller: { name: nct6798 }
+#       pwm: 2
+#       tach: 2
+#     SYS_FAN2:
+#       label: SYS_FAN2
+#       controller: { name: nct6798 }
+#       pwm: 3
+#       tach: 3
+#     SYS_FAN3:                       # refroidissement Tesla V100 n°1
+#       label: SYS_FAN3
+#       controller: { name: nct6798, address: nct6775.2592 }
+#       pwm: 4
+#       tach: 4
+#     SYS_FAN4:                       # refroidissement Tesla V100 n°2
+#       label: SYS_FAN4
+#       # Variante « chemin explicite » : le segment hwmonN est neutralisé à la
+#       # résolution, seul le device sous-jacent est comparé.
+#       pwm_path: /sys/devices/platform/nct6775.2592/hwmon/hwmon2/pwm5
+#       tach_path: /sys/devices/platform/nct6775.2592/hwmon/hwmon2/fan5_input
+#
+# Une entrée qui ne se résout pas est signalée dans les journaux et par la
+# commande `discover`, jamais fatale : la ventilation ne doit pas s'arrêter à
+# cause d'un fichier de configuration.
+
 calibration:
   identify_step_seconds: 6
   identify_low_pwm: 70

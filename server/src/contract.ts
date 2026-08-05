@@ -41,6 +41,7 @@ export type {
   HardwareMetrics,
   HistoryMarker,
   HistoryPoint,
+  RpmSource,
   SensorRef,
   Service,
   ServiceGroup,

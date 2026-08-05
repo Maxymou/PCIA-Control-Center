@@ -103,10 +103,12 @@ export function FanHistoryChart() {
 
   const data = useMemo(
     () => history.map((p) => {
-      const row: Record<string, number> = { t: p.t };
+      // `null` et non 0 : une mesure manquante doit laisser un trou dans la
+      // courbe, pas un passage à zéro qui se lirait comme un ventilateur arrêté.
+      const row: Record<string, number | null> = { t: p.t };
       for (const f of FAN_SERIES) {
-        row[`rpm_${f.id}`] = p.rpm[f.id] ?? 0;
-        row[`pwm_${f.id}`] = p.pwm[f.id] ?? 0;
+        row[`rpm_${f.id}`] = p.rpm[f.id] ?? null;
+        row[`pwm_${f.id}`] = p.pwm[f.id] ?? null;
       }
       return row;
     }),

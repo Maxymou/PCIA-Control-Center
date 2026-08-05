@@ -5,6 +5,7 @@ import { useUiStore } from '../../store/useUiStore';
 import { dataService } from '../../services/dataService';
 import type { FanCurve, FanMode, HardwareId, SensorRef } from '../../types';
 import { FAN_MODE_LABELS } from '../../utils/labels';
+import { fmtRpm } from '../../utils/format';
 import { CurveEditor } from './CurveEditor';
 import { StatusDot } from '../../components/Common';
 import { HelpTip } from '../../ui/Tooltip';
@@ -186,7 +187,7 @@ export function FanSettings() {
           <span className="muted small mono">{fan.id}</span>
         </div>
         <span className="mono small">
-          {live.pwm} % · {live.rpm} RPM · réf. {live.refTemp.toFixed(1)} °C
+          {live.pwm} % · {fmtRpm(live.rpm, live.rpmSource)} · réf. {live.refTemp.toFixed(1)} °C
         </span>
       </div>
 
@@ -321,6 +322,7 @@ export function FanSettings() {
         curve={fan.curve}
         currentTemp={live.refTemp}
         currentRpm={live.rpm}
+        currentRpmSource={live.rpmSource}
         onChange={onCurveChange}
         onCommit={onCurveCommit}
         disabled={!link.commandsEnabled}
