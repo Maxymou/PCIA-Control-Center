@@ -12,7 +12,7 @@ import { createLogger, setLogFormat, setLogLevel } from './logger.js';
 import { openAndMigrate } from './db/database.js';
 import { createRepositories, seedDefaults } from './db/repositories.js';
 import { FanIpcClient, readStateFile } from './fan/ipc.js';
-import { canWriteDir, createRuntimeEnv } from './runtime.js';
+import { canWriteDirReadOnly, createRuntimeEnv } from './runtime.js';
 import { readSystemInfo } from './system/info.js';
 import { hasTool, KNOWN_TOOLS } from './system/exec.js';
 import { FAN_IDS } from './contract.js';
@@ -83,10 +83,27 @@ async function main(): Promise<void> {
   }
 
   const loaded = loadConfig(args.configPath);
-  const resolved = resolveWritablePaths(loaded.config, canWriteDir);
+  // Sonde en lecture seule : une commande de diagnostic ne crée aucun répertoire.
+  const resolved = resolveWritablePaths(loaded.config, canWriteDirReadOnly);
   const config = resolved.config;
   setLogLevel(args.json ? 'error' : config.logging.level);
   setLogFormat('text');
+
+  // Un repli sur les chemins utilisateur signifie que la CLI **ne regarde pas**
+  // les fichiers du service : elle lirait une base et un état vides, et
+  // annoncerait un moteur hors ligne alors qu'il tourne. Le dire franchement.
+  const fellBack = resolved.warnings.length > 0;
+  if (!args.json) {
+    for (const w of [...loaded.warnings, ...resolved.warnings]) {
+      process.stderr.write(`Avertissement : ${w}\n`);
+    }
+    if (fellBack) {
+      process.stderr.write(
+        'Avertissement : les chemins du service ne sont pas accessibles depuis ce compte.\n'
+        + '                Relancer avec sudo pour interroger l’installation réelle.\n\n',
+      );
+    }
+  }
 
   const client = new FanIpcClient(fanSocketPath(config));
 
@@ -110,6 +127,8 @@ async function main(): Promise<void> {
         distribution: info.distribution,
         fanEngine: {
           online,
+          /** `true` : impossible de conclure, les chemins du service sont illisibles. */
+          undetermined: !online && fellBack,
           pid: state?.pid ?? null,
           lastHeartbeat: state ? new Date(state.heartbeat).toISOString() : null,
           failsafe: state?.failsafe ?? false,
@@ -122,7 +141,13 @@ async function main(): Promise<void> {
         `Interface        : ${data.server}`,
         `Base             : ${data.database}`,
         `Machine          : ${data.host} · ${data.distribution} · noyau ${data.kernel}`,
-        `Moteur ventilation : ${online ? `en ligne (pid ${data.fanEngine.pid})` : 'HORS LIGNE'}`,
+        // « HORS LIGNE » n'est une information que si l'on a réellement pu lire
+        // le fichier d'état du service. Sinon c'est un défaut de droits.
+        `Moteur ventilation : ${online
+          ? `en ligne (pid ${data.fanEngine.pid})`
+          : fellBack
+            ? 'INDÉTERMINÉ (état du service illisible depuis ce compte — relancer avec sudo)'
+            : 'HORS LIGNE'}`,
         ...(state?.outputs ?? []).map(
           (o) => `  ${o.id.padEnd(9)} ${o.controlState.padEnd(20)} ${String(o.pwm).padStart(3)} %  ${o.rpm ?? '—'} RPM`,
         ),

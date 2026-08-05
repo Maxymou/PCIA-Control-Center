@@ -31,6 +31,74 @@ surveillerait la vitesse d'un **autre** ventilateur. Une sortie réellement
 arrêtée passerait inaperçue, sur une carte passive qui n'a aucune ventilation
 propre.
 
+## 0. Prérequis : le noyau doit exposer un contrôleur de ventilation
+
+Si `packaging/hwmon-report.sh` annonce **0 sortie PWM**, il n'y a rien à mapper :
+le Super-I/O de la carte mère n'a pas de pilote chargé. `coretemp` et `nvme`
+donnent des températures, jamais de PWM ni de RPM — ce sont des capteurs, pas
+des contrôleurs de ventilation.
+
+Sur les cartes MSI X299 (Super-I/O Nuvoton NCT679x), et plus généralement sur
+beaucoup de cartes récentes, la cause est presque toujours la même : le BIOS
+déclare les ports d'E/S du Super-I/O comme ressource ACPI, et le noyau refuse
+alors de les céder au pilote.
+
+### Diagnostic, sans rien charger
+
+```bash
+sudo modprobe -n -v nct6775            # simule : n'exécute rien
+sudo sensors-detect --auto             # sonde les Super-I/O connus
+sudo dmesg | grep -iE 'nct6775|it87|acpi.*resource'
+```
+
+Un message du type `ACPI: OSL: Resource conflict; ACPI support missing from
+driver?` confirme le conflit ACPI.
+
+### Chargement d'essai (réversible, sans redémarrage)
+
+```bash
+sudo modprobe nct6775                  # ou it87, selon sensors-detect
+ls /sys/class/hwmon/hwmon*/name | xargs -I{} sh -c 'echo -n "{} : "; cat {}'
+sensors
+```
+
+Si le module refuse de se charger pour cause de conflit ACPI :
+
+```bash
+sudo modprobe nct6775 acpi_enforce_resources=lax
+```
+
+Pour annuler l'essai : `sudo modprobe -r nct6775`.
+
+Charger ce module **n'active aucun contrôle logiciel** : il ne fait qu'exposer
+les registres du Super-I/O en lecture, et les sorties restent pilotées par le
+BIOS. PCIA Control Center n'écrit un `pwm` qu'après une calibration explicite.
+
+### Rendre le chargement permanent
+
+À ne faire qu'une fois l'essai concluant :
+
+```bash
+echo nct6775 | sudo tee /etc/modules-load.d/pcia-hwmon.conf
+```
+
+Si l'option ACPI était nécessaire, elle doit être passée au noyau au démarrage —
+c'est un paramètre global, à peser :
+
+```bash
+# /etc/default/grub : GRUB_CMDLINE_LINUX_DEFAULT="... acpi_enforce_resources=lax"
+sudo update-grub && sudo reboot
+```
+
+`acpi_enforce_resources=lax` laisse un pilote accéder à des ports que l'ACPI
+revendique. C'est la manœuvre habituelle pour lire les Super-I/O, mais elle
+lève une protection du noyau : ne l'appliquez que si le chargement simple
+échoue, et vérifiez ensuite la stabilité de la machine avant d'activer le
+moindre contrôle PWM.
+
+Après le chargement, reprendre au point 1 : le relevé montrera les `pwmN` et
+les `fanN_input`, et le mappage devient possible.
+
 ## 1. Relever le matériel présent
 
 En lecture seule, sur la machine concernée :
