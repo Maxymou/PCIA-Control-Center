@@ -137,6 +137,19 @@ export function CalibrationWizard({ fanId, displayName, onClose }: {
   const session: CalibrationSession | null =
     overview?.sessions?.find((s) => s.fanId === fanId) ?? null;
 
+  // L'identification physique doit être confirmée par un humain avant toute
+  // étape agissant sur le matériel. `state` peut avoir progressé sans elle
+  // (anciennes sessions, ou étapes lancées hors ordre) : c'est `assignedHardware`,
+  // pas `state`, qui fait foi. `authorize()` refuse déjà sur ce même champ.
+  const needsIdentification = record !== null
+    && record.state !== 'NOT_CALIBRATED'
+    && record.assignedHardware === null;
+  // Cas anormal seulement : au-delà de DETECTED (juste après l'étape brute,
+  // avant confirmation — situation normale), sans identité confirmée. N'arrive
+  // qu'en rattrapant une session créée avant ce correctif, ou par une étape
+  // lancée hors ordre.
+  const hasInconsistentIdentification = needsIdentification && record?.state !== 'DETECTED';
+
   /** Recharge l'état publié par le moteur. C'est lui qui fait autorité. */
   const reload = useCallback(async () => {
     if (!calibration) return;
@@ -294,15 +307,36 @@ export function CalibrationWizard({ fanId, displayName, onClose }: {
         )}
       </section>
 
+      {hasInconsistentIdentification && (
+        <div className="banner banner--warning" style={{ marginTop: 'var(--sp-3)' }}>
+          <span aria-hidden="true">⚠</span>
+          <div className="banner__body">
+            <p className="banner__title">Identification physique non confirmée</p>
+            <p style={{ margin: 0 }}>
+              Cette calibration a progressé sans qu’un humain confirme quel
+              ventilateur physique répond à cette sortie. Relancez l’étape
+              « Identification physique » puis confirmez le matériel avant de
+              poursuivre — le moteur refuse toute étape ultérieure tant que ce
+              n’est pas fait.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* ---- Étapes ---- */}
       <ol className="calib-steps">
         {STEPS.map((step) => {
+          // L'étape d'identification n'est « Atteinte » que si le matériel a
+          // réellement été confirmé — pas seulement si `state` a progressé
+          // au-delà par des étapes lancées hors ordre (voir needsIdentification).
           const done = step.reaches !== undefined && record !== null
-            && reachedAtLeast(record.state, step.reaches);
+            && reachedAtLeast(record.state, step.reaches)
+            && (step.id !== 'identify' || record.assignedHardware !== null);
           const running = session?.busy && session.step === stepToEngineStep(step.id);
           const disabled = busy || blockedReason !== null
             || (step.id === 'start' && !outputKey)
-            || (step.id !== 'start' && record === null);
+            || (step.id !== 'start' && record === null)
+            || (!['start', 'identify'].includes(step.id) && needsIdentification);
 
           return (
             <li key={step.id} className={`calib-step${done ? ' calib-step--done' : ''}`}>
@@ -335,8 +369,12 @@ export function CalibrationWizard({ fanId, displayName, onClose }: {
               </button>
 
               {/* L'identification demande une confirmation humaine : le moteur ne
-                  peut pas savoir seul quel ventilateur physique a réagi. */}
-              {step.id === 'identify' && record?.state === 'IDENTIFIED' && (
+                  peut pas savoir seul quel ventilateur physique a réagi.
+                  Le bouton apparaît juste après l'étape brute (état DETECTED),
+                  et reste disponible pour rattraper une session incohérente
+                  (state avancé sans assignedHardware confirmé). */}
+              {step.id === 'identify' && record !== null
+                && (record.state === 'DETECTED' || needsIdentification) && (
                 <button
                   type="button"
                   className="btn-sm btn-primary"

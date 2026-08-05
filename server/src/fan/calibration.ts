@@ -401,6 +401,15 @@ export class CalibrationController {
       const output = hwmon.getOutput(session.outputKey)!;
       const record = this.deps.repos.calibration.get(fanId);
 
+      // Sans identification humaine confirmée, aucune étape suivante ne doit
+      // agir sur le matériel : on ne sait pas quel ventilateur physique répond
+      // réellement à cette sortie (voir `confirmIdentification`).
+      if (record.assignedHardware === null) {
+        session.lastError = 'Identification non confirmée : relancez l’étape « Identification physique ».';
+        session.message = session.lastError;
+        return;
+      }
+
       if (output.tachPath === null) {
         session.lastResult = { result: 'NOT_AVAILABLE' as RpmValidationResult };
         session.message = 'Aucun retour tachymétrique : la sortie sera restreinte.';
@@ -460,6 +469,13 @@ export class CalibrationController {
       const hwmon = this.deps.engine.hwmonBackend();
       const config = this.deps.engine.appConfig().calibration;
       const record = this.deps.repos.calibration.get(fanId);
+
+      if (record.assignedHardware === null) {
+        session.lastError = 'Identification non confirmée : relancez l’étape « Identification physique ».';
+        session.message = session.lastError;
+        return;
+      }
+
       const hasTach = hwmon.getOutput(session.outputKey)?.tachPath !== null;
 
       if (!hasTach) {
@@ -527,6 +543,13 @@ export class CalibrationController {
     return this.runStep(fanId, 'test-software-control', async (session, ctx) => {
       const hwmon = this.deps.engine.hwmonBackend();
       const output = hwmon.getOutput(session.outputKey)!;
+
+      // Garde avant toute prise de contrôle logiciel : voir testRpm/detectMinimum.
+      if (this.deps.repos.calibration.get(fanId).assignedHardware === null) {
+        session.lastError = 'Identification non confirmée : relancez l’étape « Identification physique ».';
+        session.message = session.lastError;
+        return;
+      }
 
       await this.ensureManualMode(session);
       // Relu APRÈS le passage en mode manuel : cette étape enregistre les modes
@@ -645,6 +668,12 @@ export class CalibrationController {
       const output = hwmon.getOutput(session.outputKey)!;
       const sysInfo = readSystemInfo();
       let record = this.deps.repos.calibration.get(fanId);
+
+      if (record.assignedHardware === null) {
+        session.lastError = 'Identification non confirmée : relancez l’étape « Identification physique ».';
+        session.message = session.lastError;
+        return;
+      }
 
       if (!output.enablePath) {
         // Sans pwm_enable, il n'existe aucun moyen de rendre la main au BIOS.
