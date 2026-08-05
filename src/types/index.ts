@@ -138,6 +138,11 @@ export interface FanConfig {
   minPwm: number;           // seuil minimum de fonctionnement
   warnRpm: number;          // seuils d'alerte
   curve: FanCurve;          // courbe active (mode auto)
+  /** Sortie connue comme non contrôlable en pratique (ex. pwm relié à la
+   *  carte mère uniquement par le tachymètre) : supervision RPM seule, jamais
+   *  proposée à l'autorisation. Ne se réinitialise jamais avec la calibration
+   *  — c'est une caractéristique matérielle, pas un état de session. */
+  monitoringOnly: boolean;
 }
 
 /** D'où vient la vitesse affichée.

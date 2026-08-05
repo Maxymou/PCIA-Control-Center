@@ -187,6 +187,13 @@ calibration:
   bios_return_observe_seconds: 12
   # Toute calibration est interrompue au-delà de cette température.
   abort_temperature_c: 85
+  # Plafond de RPM plausible pour test-rpm, sorties de refroidissement passif
+  # uniquement (Tesla V100 : ~15 340 RPM mesurés à 100 % sur matériel sain).
+  # Les sorties classiques restent plafonnées à 12 000 RPM (non configurable).
+  passive_rpm_plausible_max: 20000
+  # Une session sans interaction pendant ce délai est restituée au BIOS
+  # automatiquement (filet de sécurité contre les sessions abandonnées).
+  session_idle_timeout_ms: 900000
 
 alerts:
   # Seuils [attention, critique] par composant, en °C.

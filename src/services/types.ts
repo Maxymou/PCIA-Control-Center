@@ -81,6 +81,10 @@ export interface CalibrationOverview {
   sessions: CalibrationSession[];
   engineOnline: boolean;
   requireBiosReturnValidation: boolean;
+  /** Pour savoir si une sortie est en supervision tachymétrique seule
+   *  (`monitoringOnly`) — caractéristique matérielle de `fan_configs`,
+   *  indépendante de l'état de calibration. */
+  fanConfigs: FanConfig[];
 }
 
 /** Assistant de calibration — chaque appel atteint le matériel réel.

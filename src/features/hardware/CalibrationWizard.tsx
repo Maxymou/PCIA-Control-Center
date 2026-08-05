@@ -136,6 +136,11 @@ export function CalibrationWizard({ fanId, displayName, onClose }: {
   const record = overview?.records.find((r) => r.fanId === fanId) ?? null;
   const session: CalibrationSession | null =
     overview?.sessions?.find((s) => s.fanId === fanId) ?? null;
+  // Caractéristique matérielle de fan_configs, indépendante de tout état de
+  // calibration : une sortie connue comme non contrôlable (ex. pwm relié à la
+  // carte mère uniquement par le tachymètre) n'est jamais proposée à
+  // l'autorisation, quel que soit `record.state`.
+  const monitoringOnly = overview?.fanConfigs.find((c) => c.id === fanId)?.monitoringOnly ?? false;
 
   // L'identification physique doit être confirmée par un humain avant toute
   // étape agissant sur le matériel. `state` peut avoir progressé sans elle
@@ -393,21 +398,37 @@ export function CalibrationWizard({ fanId, displayName, onClose }: {
       {/* ---- Autorisation finale ---- */}
       <section style={{ marginTop: 'var(--sp-4)' }}>
         <h3 className="card-title">Autorisation</h3>
-        <p className="small muted">
-          Une sortie autorisée sera pilotée automatiquement aux démarrages suivants.
-          Sans retour tachymétrique confirmé <b>et</b> retour BIOS confirmé, elle ne
-          peut être qu’« restreinte » : utilisable manuellement, jamais reprise
-          automatiquement.
-        </p>
+        {monitoringOnly ? (
+          <div className="banner banner--warning" role="status">
+            <span aria-hidden="true">⚠</span>
+            <div className="banner__body">
+              <p className="banner__title">Supervision tachymétrique uniquement — contrôle de vitesse indisponible</p>
+              <p style={{ margin: 0 }}>
+                Cette sortie est déclarée non contrôlable (constatation matérielle,
+                voir les notes de calibration). Le RPM reste affiché et surveillé ;
+                aucune autorisation ne sera jamais proposée pour elle.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <p className="small muted">
+            Une sortie autorisée sera pilotée automatiquement aux démarrages suivants.
+            Sans retour tachymétrique confirmé <b>et</b> retour BIOS confirmé, elle ne
+            peut être qu’« restreinte » : utilisable manuellement, jamais reprise
+            automatiquement.
+          </p>
+        )}
         <div className="row row-wrap">
-          <button
-            type="button"
-            className="btn-primary"
-            disabled={busy || blockedReason !== null || record === null}
-            onClick={() => void calibration?.authorize(fanId, false).then(reload).catch((e) => setError(e.message))}
-          >
-            Autoriser cette sortie
-          </button>
+          {!monitoringOnly && (
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={busy || blockedReason !== null || record === null}
+              onClick={() => void calibration?.authorize(fanId, false).then(reload).catch((e) => setError(e.message))}
+            >
+              Autoriser cette sortie
+            </button>
+          )}
           <button
             type="button"
             disabled={busy || blockedReason !== null || record === null}

@@ -51,11 +51,21 @@ const HARDWARE_FOR: Record<FanId, HardwareId> = {
 };
 
 /** Identification physique + confirmation, préalable désormais obligatoire à
- *  toute étape suivante (voir `describe('garde-fou identification')` plus bas). */
-async function identifyAndConfirm(fanId: FanId): Promise<void> {
+ *  toute étape suivante (voir `describe('garde-fou identification')` plus bas).
+ *
+ *  `tachKey` : par défaut, laisse `confirmIdentification` retenir la
+ *  suggestion de `identify()` — comportement réel de l'assistant. La passer
+ *  explicitement à `null` (sortie volontairement sans tachymètre, ex. test
+ *  « sans tachymètre ») évite un test intermittent : sans cela, le modèle
+ *  physique simulé peut occasionnellement suggérer le tachymètre d'un *autre*
+ *  ventilateur du même contrôleur et le lier à tort à cette sortie. */
+async function identifyAndConfirm(fanId: FanId, opts: { tachKey?: string | null } = {}): Promise<void> {
   expect(host.calibration.identify(fanId).ok).toBe(true);
   await waitIdle(fanId);
-  const result = host.calibration.confirmIdentification(fanId, { assignedHardware: HARDWARE_FOR[fanId] });
+  const result = host.calibration.confirmIdentification(fanId, {
+    assignedHardware: HARDWARE_FOR[fanId],
+    ...(opts.tachKey !== undefined ? { tachKey: opts.tachKey } : {}),
+  });
   expect(result.ok).toBe(true);
 }
 
@@ -196,7 +206,8 @@ describe('étapes', () => {
     env.hwmon.setTachAvailable('SYS_FAN2', false);
     const key = env.hwmon.outputKeyByLabel('SYS_FAN2')!;
     host.calibration.start('SYS_FAN2', key);
-    await identifyAndConfirm('SYS_FAN2');
+    // tachKey: null explicite — voir la documentation d'identifyAndConfirm.
+    await identifyAndConfirm('SYS_FAN2', { tachKey: null });
     host.calibration.testRpm('SYS_FAN2');
     await waitIdle('SYS_FAN2');
 
@@ -406,6 +417,56 @@ describe('autorisation', () => {
     },
     180_000,
   );
+
+  // Preuve requise avant d'appliquer la révocation SQL proposée pour SYS_FAN2 :
+  // state='RESTRICTED' + software_control_validated=0 + bios_return=NULL +
+  // calibrated_at=NULL (sans toucher outputKey/assignedHardware/rpmValidation/
+  // minimumPwm) doit exiger exactement test-software-control et test-bios-return
+  // avant une nouvelle autorisation — ni identification, ni test RPM, ni minimum.
+  it('après révocation (RESTRICTED), seules test-software-control et test-bios-return suffisent avant une nouvelle autorisation', async () => {
+    await fullCalibration('SYS_FAN2');
+    expect(host.calibration.authorize('SYS_FAN2').ok).toBe(true);
+
+    const authorizedRecord = env.repos.calibration.get('SYS_FAN2');
+    expect(authorizedRecord.state).toBe('AUTHORIZED');
+    // Révocation telle que proposée : mêmes champs que le script SQL, rien d'autre.
+    env.repos.calibration.save({
+      ...authorizedRecord,
+      state: 'RESTRICTED',
+      softwareControlValidated: false,
+      biosReturn: null,
+      calibratedAt: null,
+    });
+
+    // Sans rien refaire d'autre : refus attendu, motifs précis.
+    const premature = host.calibration.authorize('SYS_FAN2');
+    expect(premature.ok).toBe(false);
+    expect(premature.error).toMatch(/contrôle logiciel non validé/);
+    expect(premature.error).toMatch(/retour BIOS non confirmé/);
+    // Preuve que rien d'autre n'est requis : ni identification, ni RPM, ni minimum.
+    expect(premature.error).not.toMatch(/matériel non identifié|retour RPM incohérent|minimum non déterminé/);
+
+    // authorize() a supprimé la session en mémoire (finish()) : il faut la
+    // rouvrir avec le même outputKey déjà connu — un préalable technique
+    // transparent, pas une étape de l'assistant, avant de pouvoir relancer
+    // test-software-control et test-bios-return.
+    expect(host.calibration.start('SYS_FAN2', authorizedRecord.outputKey!).ok).toBe(true);
+    // L'état RESTRICTED et l'affectation matérielle survivent à la réouverture.
+    expect(env.repos.calibration.get('SYS_FAN2').state).toBe('RESTRICTED');
+    expect(env.repos.calibration.get('SYS_FAN2').assignedHardware).toBe(HARDWARE_FOR.SYS_FAN2);
+
+    // Uniquement les deux étapes citées — pas identify, pas testRpm, pas detectMinimum.
+    expect(host.calibration.testSoftwareControl('SYS_FAN2').ok).toBe(true);
+    await waitIdle('SYS_FAN2', 30_000);
+    expect(host.calibration.testBiosReturn('SYS_FAN2').ok).toBe(true);
+    await waitIdle('SYS_FAN2', 30_000);
+
+    const result = host.calibration.authorize('SYS_FAN2');
+    expect(result.ok).toBe(true);
+    expect(env.repos.calibration.get('SYS_FAN2').state).toBe('AUTHORIZED');
+    // L'identification et la mesure RPM d'origine n'ont pas été refaites.
+    expect(env.repos.calibration.get('SYS_FAN2').assignedHardware).toBe(HARDWARE_FOR.SYS_FAN2);
+  }, 180_000);
 
   it('réinitialise une calibration et repasse au BIOS', async () => {
     await fullCalibration('CPU_FAN1');

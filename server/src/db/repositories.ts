@@ -409,23 +409,24 @@ export class FanConfigRepo {
       minPwm: r.min_pwm,
       warnRpm: r.warn_rpm,
       curve: jsonOrNull<FanCurve>(r.curve) ?? [],
+      monitoringOnly: r.monitoring_only === 1,
     };
   }
 
   upsert(cfg: FanConfig): void {
     this.db.prepare(
       `INSERT INTO fan_configs (id, display_name, assigned_hardware, custom_hardware_label, sensor,
-       mode, manual_pwm, min_pwm, warn_rpm, curve, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       mode, manual_pwm, min_pwm, warn_rpm, curve, monitoring_only, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name,
        assigned_hardware=excluded.assigned_hardware, custom_hardware_label=excluded.custom_hardware_label,
        sensor=excluded.sensor, mode=excluded.mode, manual_pwm=excluded.manual_pwm,
        min_pwm=excluded.min_pwm, warn_rpm=excluded.warn_rpm, curve=excluded.curve,
-       updated_at=excluded.updated_at`,
+       monitoring_only=excluded.monitoring_only, updated_at=excluded.updated_at`,
     ).run(
       cfg.id, cfg.displayName, cfg.assignedHardware, cfg.customHardwareLabel ?? null,
       JSON.stringify(cfg.sensor), cfg.mode, cfg.manualPwm, cfg.minPwm, cfg.warnRpm,
-      JSON.stringify(cfg.curve), now(),
+      JSON.stringify(cfg.curve), cfg.monitoringOnly ? 1 : 0, now(),
     );
     this.bumpRevision();
   }

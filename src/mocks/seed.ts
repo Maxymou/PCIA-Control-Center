@@ -90,11 +90,11 @@ export const seedProfiles: FanProfile[] = [
 ];
 
 export const seedFanConfigs: FanConfig[] = [
-  { id: 'CPU_FAN1', displayName: 'Ventirad CPU', assignedHardware: 'cpu', sensor: { kind: 'single', source: 'cpu' }, mode: 'auto', manualPwm: 40, minPwm: 10, warnRpm: 300, curve: curveBalanced.map((p) => ({ ...p })) },
-  { id: 'SYS_FAN1', displayName: 'Façade avant', assignedHardware: 'case-front', sensor: { kind: 'hottest-gpu' }, mode: 'auto', manualPwm: 40, minPwm: 10, warnRpm: 250, curve: curveBalanced.map((p) => ({ ...p })) },
-  { id: 'SYS_FAN2', displayName: 'Extraction arrière', assignedHardware: 'case-rear', sensor: { kind: 'single', source: 'cpu' }, mode: 'auto', manualPwm: 40, minPwm: 10, warnRpm: 250, curve: curveBalanced.map((p) => ({ ...p })) },
-  { id: 'SYS_FAN3', displayName: 'Flux V100 n°1', assignedHardware: 'v100-1', sensor: { kind: 'single', source: 'v100-1' }, mode: 'auto', manualPwm: 50, minPwm: 15, warnRpm: 400, curve: curvePerf.map((p) => ({ ...p })) },
-  { id: 'SYS_FAN4', displayName: 'Flux V100 n°2', assignedHardware: 'v100-2', sensor: { kind: 'single', source: 'v100-2' }, mode: 'auto', manualPwm: 50, minPwm: 15, warnRpm: 400, curve: curvePerf.map((p) => ({ ...p })) },
+  { id: 'CPU_FAN1', displayName: 'Ventirad CPU', assignedHardware: 'cpu', sensor: { kind: 'single', source: 'cpu' }, mode: 'auto', manualPwm: 40, minPwm: 10, warnRpm: 300, curve: curveBalanced.map((p) => ({ ...p })), monitoringOnly: false },
+  { id: 'SYS_FAN1', displayName: 'Façade avant', assignedHardware: 'case-front', sensor: { kind: 'hottest-gpu' }, mode: 'auto', manualPwm: 40, minPwm: 10, warnRpm: 250, curve: curveBalanced.map((p) => ({ ...p })), monitoringOnly: false },
+  { id: 'SYS_FAN2', displayName: 'Extraction arrière', assignedHardware: 'case-rear', sensor: { kind: 'single', source: 'cpu' }, mode: 'auto', manualPwm: 40, minPwm: 10, warnRpm: 250, curve: curveBalanced.map((p) => ({ ...p })), monitoringOnly: false },
+  { id: 'SYS_FAN3', displayName: 'Flux V100 n°1', assignedHardware: 'v100-1', sensor: { kind: 'single', source: 'v100-1' }, mode: 'auto', manualPwm: 50, minPwm: 15, warnRpm: 400, curve: curvePerf.map((p) => ({ ...p })), monitoringOnly: false },
+  { id: 'SYS_FAN4', displayName: 'Flux V100 n°2', assignedHardware: 'v100-2', sensor: { kind: 'single', source: 'v100-2' }, mode: 'auto', manualPwm: 50, minPwm: 15, warnRpm: 400, curve: curvePerf.map((p) => ({ ...p })), monitoringOnly: false },
 ];
 
 export const FAN_MAX_RPM: Record<FanId, number> = {

@@ -58,6 +58,10 @@ export function defaultFanConfigs(): FanConfig[] {
       id: 'CPU_FAN1', displayName: 'Ventirad CPU', assignedHardware: 'cpu',
       sensor: { kind: 'single', source: 'cpu' }, mode: 'auto',
       manualPwm: 40, minPwm: 15, warnRpm: 300, curve: balanced.curves.CPU_FAN1,
+      // Par défaut false pour toute installation : passer une sortie en
+      // supervision seule est une constatation matérielle propre à une
+      // machine donnée, jamais une valeur générique livrée par défaut.
+      monitoringOnly: false,
     },
     // SYS_FAN1 = arrière et SYS_FAN2 = avant : c'est l'inverse de ce que
     // suggèrent les numéros, et c'est ce que le BIOS de la carte confirme.
@@ -67,21 +71,25 @@ export function defaultFanConfigs(): FanConfig[] {
       id: 'SYS_FAN1', displayName: 'Boîtier arrière', assignedHardware: 'case-rear',
       sensor: { kind: 'single', source: 'cpu' }, mode: 'auto',
       manualPwm: 40, minPwm: 15, warnRpm: 250, curve: balanced.curves.SYS_FAN1,
+      monitoringOnly: false,
     },
     {
       id: 'SYS_FAN2', displayName: 'Boîtier avant', assignedHardware: 'case-front',
       sensor: { kind: 'hottest-gpu' }, mode: 'auto',
       manualPwm: 40, minPwm: 15, warnRpm: 250, curve: balanced.curves.SYS_FAN2,
+      monitoringOnly: false,
     },
     {
       id: 'SYS_FAN3', displayName: 'Flux PCIe 1 — Tesla V100 n°1', assignedHardware: 'v100-1',
       sensor: { kind: 'single', source: 'v100-1' }, mode: 'auto',
       manualPwm: 55, minPwm: PASSIVE_FLOOR_PWM, warnRpm: 400, curve: balanced.curves.SYS_FAN3,
+      monitoringOnly: false,
     },
     {
       id: 'SYS_FAN4', displayName: 'Flux PCIe 2 — Tesla V100 n°2', assignedHardware: 'v100-2',
       sensor: { kind: 'single', source: 'v100-2' }, mode: 'auto',
       manualPwm: 55, minPwm: PASSIVE_FLOOR_PWM, warnRpm: 400, curve: balanced.curves.SYS_FAN4,
+      monitoringOnly: false,
     },
   ];
 }

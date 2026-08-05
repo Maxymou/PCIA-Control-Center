@@ -444,15 +444,26 @@ export class FanEngine {
       runtime.observedBiosMode = cal.biosEnableMode ?? output.currentEnableMode;
 
       // 4. Autorisation de prise de contrôle.
+      // Supervision tachymétrique seule : caractéristique matérielle connue
+      // (fan_configs.monitoringOnly), prioritaire sur tout état de calibration —
+      // même un `state === 'AUTHORIZED'` hérité d'avant ce correctif ne doit
+      // jamais reprendre le contrôle logiciel.
+      if (runtime.config.monitoringOnly) {
+        runtime.controlState = 'BIOS_CONTROLLED';
+        this.reconcileOrphanedManualMode(runtime, cal);
+        continue;
+      }
       const authorized = cal.state === 'AUTHORIZED';
       const biosReturnOk = !this.deps.config.fanControl.requireBiosReturnValidation
         || cal.biosReturn === 'CONFIRMED';
       if (!authorized) {
-        runtime.controlState = cal.state === 'RESTRICTED' ? 'BIOS_CONTROLLED' : 'BIOS_CONTROLLED';
+        runtime.controlState = 'BIOS_CONTROLLED';
+        this.reconcileOrphanedManualMode(runtime, cal);
         continue;
       }
       if (!biosReturnOk) {
         runtime.controlState = 'BIOS_CONTROLLED';
+        this.reconcileOrphanedManualMode(runtime, cal);
         warnings.push(`${runtime.id} : retour BIOS non confirmé — contrôle logiciel automatique refusé.`);
         continue;
       }
@@ -461,6 +472,35 @@ export class FanEngine {
     }
 
     this.warnings = warnings;
+  }
+
+  /** Filet de sécurité indépendant des sessions de calibration : une sortie
+   *  censée être sous BIOS mais dont le pilote rapporte encore le mode manuel
+   *  est ramenée de force au BIOS. Couvre les cas qu'aucun chemin applicatif
+   *  n'a anticipés (arrêt non-gracieux du processus, session jamais fermée
+   *  avant un redémarrage, etc.) — indépendamment de la cause exacte. Appelée
+   *  au démarrage (`evaluateControlTakeover` initial) et à chaque tick pour
+   *  toute sortie non suspendue et non sous contrôle logiciel. */
+  private reconcileOrphanedManualMode(runtime: OutputRuntime, cal: CalibrationRecord): void {
+    if (!cal.outputKey) return;
+    const output = this.deps.hwmon.getOutput(cal.outputKey);
+    if (!output?.enablePath) return;
+    const current = this.deps.hwmon.readEnableMode(cal.outputKey);
+    const expectedBios = cal.biosEnableMode ?? output.currentEnableMode;
+    const manualMode = cal.manualEnableMode ?? MANUAL_ENABLE_MODE;
+    if (current === null || expectedBios === null || current !== manualMode || current === expectedBios) return;
+    try {
+      this.deps.hwmon.writeEnableMode(cal.outputKey, expectedBios);
+      log.warn('Sortie manuelle orpheline réconciliée — restitution BIOS forcée', {
+        fanId: runtime.id, outputKey: cal.outputKey, from: current, to: expectedBios,
+      });
+      this.emitEvent({
+        category: 'fan', level: 'warning', targetLabel: runtime.config.displayName,
+        message: 'Sortie trouvée en mode manuel sans autorisation valide — restituée au BIOS automatiquement.',
+      });
+    } catch (err) {
+      log.error('Réconciliation impossible : écriture du mode BIOS refusée', { fanId: runtime.id, error: err });
+    }
   }
 
   private invalidate(runtime: OutputRuntime, reason: string): void {
@@ -542,6 +582,11 @@ export class FanEngine {
         // La calibration pilote cette sortie : on se contente d'observer.
         this.readRpm(runtime);
         continue;
+      }
+      // Filet de sécurité continu : une sortie non autorisée ne doit jamais
+      // rester en mode manuel, quelle qu'en soit la cause.
+      if (runtime.controlState !== 'SOFTWARE_CONTROLLED') {
+        this.reconcileOrphanedManualMode(runtime, runtime.calibration);
       }
       this.tickOutput(runtime, now, config);
     }

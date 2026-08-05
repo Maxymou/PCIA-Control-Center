@@ -48,6 +48,10 @@ export async function registerCalibrationRoutes(app: FastifyInstance, ctx: ApiCo
       sessions,
       engineOnline: ctx.fans.online(),
       requireBiosReturnValidation: ctx.config.fanControl.requireBiosReturnValidation,
+      // Nécessaire pour que l'assistant sache si une sortie est en supervision
+      // seule (`monitoringOnly`) — caractéristique de fan_configs, pas de l'état
+      // de calibration.
+      fanConfigs: ctx.repos.fanConfigs.list(),
     };
   });
 

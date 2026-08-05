@@ -107,6 +107,16 @@ const calibrationSchema = z.object({
   biosReturnObserveSeconds: z.number().int().min(3).max(60).default(12),
   /** Température au-delà de laquelle toute calibration est refusée/interrompue. */
   abortTemperatureC: z.number().min(40).max(110).default(85),
+  /** Plafond de RPM plausible pour testRpm — sorties de refroidissement passif
+   *  (blowers 40 mm haute vitesse, ex. Tesla V100) uniquement. Mesuré en
+   *  production : ~15 340 RPM à 100 % sur du matériel sain. Le plafond par
+   *  défaut de 12 000 RPM (sorties classiques, non modifiable ici) les faisait
+   *  échouer à tort en INCONSISTENT malgré une réponse PWM/tach parfaite
+   *  (monotonic, spread, retour au palier initial tous conformes). */
+  passiveRpmPlausibleMax: z.number().int().min(1000).max(30_000).default(20_000),
+  /** Une session de calibration sans aucune interaction pendant ce délai est
+   *  traitée comme abandonnée : état initial restauré, sortie rendue au BIOS. */
+  sessionIdleTimeoutMs: z.number().int().min(60_000).max(3_600_000).default(900_000),
 });
 
 // ---------------------------------------------------------------------
