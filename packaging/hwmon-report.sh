@@ -76,6 +76,40 @@ else
   done
 fi
 
+section "Bilan : contrôleur de ventilation présent ?"
+# Le seul point qui compte pour PCIA : existe-t-il au moins un `pwmN` ?
+# Sans lui, il n'y a ni contrôle de ventilation, ni lecture de vitesse — et
+# aucun mappage n'est possible, faute de matériel exposé par le noyau.
+pwm_count=0
+fan_count=0
+for h in /sys/class/hwmon/hwmon*; do
+  [[ -e "$h" ]] || continue
+  for p in "$h"/pwm[0-9]; do [[ -e "$p" ]] && pwm_count=$((pwm_count + 1)); done
+  for f in "$h"/fan[0-9]_input; do [[ -e "$f" ]] && fan_count=$((fan_count + 1)); done
+done
+printf '  sorties PWM (pwmN)        : %d\n' "$pwm_count"
+printf '  canaux tachymétriques     : %d\n' "$fan_count"
+
+if [[ "$pwm_count" -eq 0 ]]; then
+  cat <<'EOF'
+
+  AUCUNE SORTIE PWM N'EST EXPOSÉE PAR LE NOYAU.
+
+  Les ventilateurs sont donc pilotés exclusivement par le BIOS, et aucune
+  vitesse n'est mesurable. Ce n'est pas un défaut de PCIA Control Center :
+  le contrôleur Super-I/O de la carte mère n'a pas de pilote chargé.
+
+  Cause habituelle : le module hwmon du Super-I/O n'est pas chargé, souvent
+  parce que le BIOS réserve ses ports d'E/S via ACPI et que le noyau refuse
+  alors de les prendre.
+
+  Diagnostic complémentaire (lecture seule) :
+    sudo modprobe -n -v nct6775          # simule le chargement, n'exécute rien
+    sudo dmesg | grep -iE 'nct6775|acpi.*resource|it87'
+    sudo sensors-detect --auto           # sonde les Super-I/O connus
+EOF
+fi
+
 section "Modules noyau de supervision chargés"
 if [[ -r /proc/modules ]]; then
   grep -E '^(nct[0-9]+|it87|f71882fg|w83[0-9a-z]+|k10temp|coretemp|asus[a-z_]*|dell_smm|applesmc|hwmon)' \

@@ -37,6 +37,20 @@ export function canWriteDir(dir: string): boolean {
   }
 }
 
+/** Même question, **sans rien créer**.
+ *
+ *  Réservé aux commandes de diagnostic : `pcia-control-center status` ne doit
+ *  pas laisser derrière lui un ~/.local/state/pcia-control-center vide, créé
+ *  uniquement parce qu'il a testé s'il pouvait écrire quelque part. */
+export function canWriteDirReadOnly(dir: string): boolean {
+  try {
+    accessSync(dir, constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function createRuntimeEnv(config: AppConfig): RuntimeEnv {
   setLogLevel(config.logging.level);
   setLogFormat(config.logging.format);
