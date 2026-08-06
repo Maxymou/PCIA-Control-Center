@@ -203,13 +203,15 @@ export class AppState {
       const output = engineState?.outputs.find((o) => o.id === id);
       const cfg = configs.get(id);
       if (!output) {
-        // Moteur injoignable : on ne fabrique pas de mesure.
-        return { id, pwm: 0, rpm: 0, refTemp: 0, status: 'unknown' };
+        // Moteur injoignable : on ne fabrique pas de mesure. `rpm: null` dit
+        // « inconnu » ; un 0 aurait dit « ventilateur arrêté ».
+        return { id, pwm: 0, rpm: null, rpmSource: 'unavailable', refTemp: 0, status: 'unknown' };
       }
       return {
         id,
         pwm: output.pwm,
-        rpm: output.rpm ?? 0,
+        rpm: output.rpm,
+        rpmSource: output.rpmSource,
         refTemp: output.refTemp ?? 0,
         status: output.severity as Severity,
         testRemaining: output.testRemainingS ?? undefined,
@@ -327,6 +329,7 @@ export class AppState {
       markers: this.opts.repos.history.markers(from, now),
       system: this.systemStatus(engine),
       fanOutputs: engine.state?.outputs ?? [],
+      unconnectedOutputs: engine.state?.unconnectedOutputs ?? [],
       calibration: this.opts.repos.calibration.list(),
     };
 

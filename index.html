@@ -2,11 +2,71 @@
 <html lang="fr">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!--
+      viewport-fit=cover : l'application peint elle-même les encoches et
+      l'indicateur d'accueil (variables --sat/--sab/--sal/--sar).
+
+      Ni `maximum-scale=1` ni `user-scalable=no` : bloquer le zoom violerait le
+      critère WCAG 2.2 AA 1.4.4 (redimensionnement du texte) sur une interface
+      qui affiche des températures et des consignes de ventilation. Le zoom
+      involontaire d'iOS à la mise au point d'un champ est évité autrement, en
+      garantissant une taille de police d'au moins 16 px sur pointeur grossier
+      (cf. src/styles/components.css). Compromis détaillé dans docs/PWA.md.
+    -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+
     <title>PCIA Control Center</title>
+    <meta
+      name="description"
+      content="Supervision et pilotage d'un serveur Ubuntu dédié à l'intelligence artificielle : matériel, services, ventilation."
+    />
+
+    <!-- Doit rester identique à --bg (src/styles/tokens.css) et au
+         background_color du manifest : sinon la PWA affiche un flash blanc au
+         lancement et une barre d'état dépareillée. -->
+    <meta name="theme-color" content="#101216" />
+    <meta name="color-scheme" content="dark" />
+
+    <!-- iOS : application autonome depuis l'écran d'accueil. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="PCIA Control Center" />
+    <meta name="mobile-web-app-capable" content="yes" />
+
+    <!-- Interface de supervision d'un réseau local : rien à indexer. -->
+    <meta name="robots" content="noindex, nofollow" />
+
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icons/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png" />
+    <!-- iOS ignore le manifest pour l'icône d'écran d'accueil : elle doit être
+         déclarée ici, en PNG opaque. -->
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon-180.png" />
+
+    <!-- Fond posé avant toute feuille de style et tout script : supprime le
+         flash blanc au démarrage à froid de la PWA installée. -->
+    <style>
+      html,
+      body,
+      #root {
+        margin: 0;
+        background-color: #101216;
+      }
+      body {
+        color: #e6e9ed;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <p style="padding: 24px; font-family: system-ui, sans-serif; color: #e6e9ed">
+        PCIA Control Center nécessite JavaScript. L'API REST reste utilisable
+        directement sous <code>/api/</code>, ainsi que l'outil en ligne de commande
+        <code>pcia-control-center</code>.
+      </p>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

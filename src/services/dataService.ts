@@ -14,9 +14,14 @@ import type { FanConfig, FanId, Snapshot } from '../types';
 import { ApiDataProvider } from './apiProvider';
 import { mockProvider } from './mockProvider';
 import { api } from './apiClient';
-import type { DataService, DemoActions, InitialConfig, LogEventInput, ProviderKind } from './types';
+import type {
+  CalibrationApi, DataService, DemoActions, FanCommands, InitialConfig, LogEventInput, ProviderKind,
+} from './types';
 
-export type { DataService, DemoActions, InitialConfig } from './types';
+export type {
+  CalibrationApi, CalibrationIdentificationInput, CalibrationOverview,
+  DataService, DemoActions, FanCommands, InitialConfig,
+} from './types';
 
 interface HealthResponse {
   status: string;
@@ -106,6 +111,15 @@ export const dataService: DataService = {
       action?.();
     },
   }),
+
+  // Résolus à l'appel : la source peut avoir changé depuis l'import. Absents en
+  // simulation locale — l'interface le détecte et l'annonce plutôt que de feindre.
+  get fanCommands(): FanCommands | undefined {
+    return active.fanCommands;
+  },
+  get calibration(): CalibrationApi | undefined {
+    return active.calibration;
+  },
 
   loadInitialConfig: (): Promise<InitialConfig | null> =>
     active.loadInitialConfig ? active.loadInitialConfig() : Promise.resolve(null),

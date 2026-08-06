@@ -16,13 +16,16 @@
 import type { AppConfig } from '../config.js';
 import type {
   CalibrationRecord, FanConfig, FanControlState, FanCurve, FanEngineState, FanId,
-  FanOutputState, HardwareId, Severity,
+  FanOutputState, HardwareId, RpmSource, Severity, UnconnectedOutputState,
 } from '../contract.js';
 import { FAN_IDS } from '../contract.js';
 import type { Repositories } from '../db/repositories.js';
 import { createLogger } from '../logger.js';
 import type { HwmonBackend } from '../hwmon/backend.js';
 import { HwmonError } from '../hwmon/backend.js';
+import {
+  collectTachs, resolveFanMapping, type ResolvedFanMapping, type ResolvedUnconnected,
+} from '../hwmon/mapping.js';
 import { readSystemInfo } from '../system/info.js';
 import { evalCurve, validateCurve } from './curve.js';
 import { effectiveMinPwm, PASSIVE_COOLING_FANS } from './defaults.js';
@@ -72,12 +75,20 @@ interface OutputRuntime {
   config: FanConfig;
   calibration: CalibrationRecord;
   controlState: FanControlState;
+  /** Sortie réellement **écrite**. Ne vient que de la calibration : c'est la
+   *  seule procédure qui vérifie physiquement la sortie et le retour au BIOS. */
   boundOutputKey: string | null;
+  /** Sortie **observée** (consigne courante, RPM). Vient du mappage déclaratif
+   *  quand il existe, sinon de la calibration. Lire n'engage rien. */
+  monitorOutputKey: string | null;
+  mappingSource: 'config' | 'calibration' | 'none';
+  connectorLabel: string | null;
   /** Dernière courbe valide — conservée si une courbe invalide est chargée. */
   lastValidCurve: FanCurve;
   pwm: number;
   requestedPwm: number;
   rpm: number | null;
+  rpmSource: RpmSource;
   refTemp: number | null;
   sensorLostSince: number | null;
   stall: StallState;
@@ -110,6 +121,11 @@ export class FanEngine {
   private stopping = false;
   private warnings: string[] = [];
   private lastHeartbeat = 0;
+  /** Mappage déclaratif résolu contre la découverte courante. */
+  private mapping = new Map<FanId, ResolvedFanMapping>();
+  /** Connecteurs déclarés non raccordés — lus, jamais écrits. */
+  private unconnected: ResolvedUnconnected[] = [];
+  private mappingWarnings: string[] = [];
 
   constructor(private deps: EngineDeps) {}
 
@@ -124,6 +140,7 @@ export class FanEngine {
     this.deps.hwmon.discover();
     this.deps.sensors.refreshMap();
     this.loadConfiguration({ initial: true });
+    this.applyDeclaredMapping();
     this.restoreTachBindings();
     this.evaluateControlTakeover();
 
@@ -150,16 +167,113 @@ export class FanEngine {
     this.started = false;
   }
 
-  /** Réapplique les liaisons tachymétriques confirmées par la calibration. */
+  /** Réapplique les liaisons tachymétriques confirmées par la calibration.
+   *
+   *  Le mappage déclaratif est prioritaire : s'il désigne explicitement un canal
+   *  RPM pour une sortie, la valeur relevée en calibration ne l'écrase pas. */
   private restoreTachBindings(): void {
     for (const o of this.outputs.values()) {
       if (!o.boundOutputKey || o.calibration.tachIndex === null) continue;
+      if (this.mapping.get(o.id)?.tachKey !== undefined) continue;
       const output = this.deps.hwmon.getOutput(o.boundOutputKey);
       if (!output) continue;
       const tachKey = `${output.controller.key}#fan${o.calibration.tachIndex}`;
       const known = this.deps.hwmon.tachKeysForController(output.controller.key).some((t) => t.key === tachKey);
       this.deps.hwmon.bindTach(o.boundOutputKey, known ? tachKey : null);
     }
+  }
+
+  /** Résout le mappage déclaré dans config.yaml et applique les canaux RPM.
+   *
+   *  À appeler après chaque (re)découverte : c'est ce qui rend le programme
+   *  insensible à la renumérotation des `hwmonN` après un redémarrage — les
+   *  sorties sont retrouvées par identité de contrôleur ou par device, jamais
+   *  par le numéro qu'elles portaient la fois précédente.
+   *
+   *  Ce mappage n'autorise **aucune** écriture : il désigne quoi lire et sur
+   *  quel canal, rien de plus. */
+  private applyDeclaredMapping(): void {
+    const declared = this.deps.config.fans.mapping;
+    const declaredUnconnected = this.deps.config.fans.unconnected;
+    this.mapping = new Map();
+    this.unconnected = [];
+    this.mappingWarnings = [];
+
+    const hasMapping = declared && Object.keys(declared).length > 0;
+    const hasUnconnected = declaredUnconnected && Object.keys(declaredUnconnected).length > 0;
+    if (!hasMapping && !hasUnconnected) return;
+
+    const discovery = this.deps.hwmon.cached();
+    const tachs = collectTachs(discovery, (key) => this.deps.hwmon.tachKeysForController(key));
+
+    if (hasMapping) this.mapping = resolveFanMapping(declared, discovery, tachs);
+
+    for (const resolved of this.mapping.values()) {
+      for (const w of resolved.warnings) {
+        this.mappingWarnings.push(w);
+        log.throttled(`mapping-${w}`, 600_000, 'warn', w);
+      }
+      // Le canal RPM déclaré est appliqué au backend : c'est lui que liront la
+      // supervision *et* la détection de ventilateur bloqué.
+      if (resolved.outputKey && resolved.tachKey !== undefined) {
+        this.deps.hwmon.bindTach(resolved.outputKey, resolved.tachKey);
+      }
+    }
+
+    if (!hasUnconnected) return;
+    this.unconnected = [...resolveFanMapping<string>(declaredUnconnected, discovery, tachs).values()];
+    const controlled = new Set(
+      [...this.mapping.values()].map((m) => m.outputKey).filter((k): k is string => k !== null),
+    );
+    for (const entry of this.unconnected) {
+      for (const w of entry.warnings) {
+        this.mappingWarnings.push(w);
+        log.throttled(`unconnected-${w}`, 600_000, 'warn', w);
+      }
+      // Garde-fou : une sortie ne peut pas être à la fois pilotée et déclarée
+      // non branchée. En cas de conflit, la déclaration « non branché » est
+      // écartée — sinon on cesserait de surveiller un ventilateur bien réel.
+      if (entry.outputKey && controlled.has(entry.outputKey)) {
+        const w = `${entry.fanId} : la sortie ${entry.outputKey} est déjà attribuée à une sortie logique `
+          + '— déclaration « non branché » ignorée.';
+        this.mappingWarnings.push(w);
+        log.warn(w);
+        entry.outputKey = null;
+        entry.unresolved = true;
+        continue;
+      }
+      if (entry.outputKey && entry.tachKey !== undefined) {
+        this.deps.hwmon.bindTach(entry.outputKey, entry.tachKey);
+      }
+    }
+  }
+
+  /** Sorties PWM déclarées non raccordées — la calibration doit les refuser. */
+  unconnectedOutputKeys(): Set<string> {
+    return new Set(this.unconnected.map((u) => u.outputKey).filter((k): k is string => k !== null));
+  }
+
+  /** Nom du connecteur déclaré non raccordé pour une sortie donnée. */
+  unconnectedLabelFor(outputKey: string): string | null {
+    return this.unconnected.find((u) => u.outputKey === outputKey)?.fanId ?? null;
+  }
+
+  private unconnectedState(): UnconnectedOutputState[] {
+    return this.unconnected.map((u): UnconnectedOutputState => {
+      // Lecture normale : sur un connecteur vide, 0 RPM est la bonne réponse et
+      // c'est une **mesure**, pas une absence de mesure.
+      const raw = u.outputKey ? this.deps.hwmon.readRpm(u.outputKey) : null;
+      const valid = raw !== null && Number.isFinite(raw) && raw >= 0;
+      return {
+        label: u.connectorLabel ?? u.fanId,
+        outputKey: u.outputKey,
+        rpm: valid ? raw : null,
+        rpmSource: !valid
+          ? 'unavailable'
+          : this.deps.hwmon.kind === 'simulated' ? 'simulated' : 'measured',
+        hwmonPath: u.outputKey ? this.deps.hwmon.getOutput(u.outputKey)?.pwmPath ?? null : null,
+      };
+    });
   }
 
   // =====================================================================
@@ -221,10 +335,14 @@ export class FanEngine {
         calibration,
         controlState: 'BIOS_CONTROLLED',
         boundOutputKey: null,
+        monitorOutputKey: null,
+        mappingSource: 'none',
+        connectorLabel: null,
         lastValidCurve: curve,
         pwm: 0,
         requestedPwm: 0,
         rpm: null,
+        rpmSource: 'unavailable',
         refTemp: null,
         sensorLostSince: null,
         stall: emptyStallState(),
@@ -246,7 +364,7 @@ export class FanEngine {
   /** Revalide la liaison matérielle d'une sortie et décide de la prise de contrôle. */
   private evaluateControlTakeover(only?: FanId): void {
     const sysInfo = readSystemInfo();
-    const warnings: string[] = [];
+    const warnings: string[] = [...this.mappingWarnings];
 
     for (const runtime of this.outputs.values()) {
       if (only && runtime.id !== only) continue;
@@ -254,6 +372,26 @@ export class FanEngine {
 
       const cal = runtime.calibration;
       runtime.boundOutputKey = null;
+
+      // --- 0. Mappage déclaratif : ce que l'on observe, avant toute calibration.
+      const declared = this.mapping.get(runtime.id);
+      runtime.connectorLabel = declared?.connectorLabel ?? runtime.id;
+      if (declared?.outputKey && this.deps.hwmon.getOutput(declared.outputKey)) {
+        runtime.monitorOutputKey = declared.outputKey;
+        runtime.mappingSource = 'config';
+      } else {
+        runtime.monitorOutputKey = null;
+        runtime.mappingSource = 'none';
+      }
+      // Divergence configuration / calibration : on la signale sans rien casser.
+      // La calibration prime pour l'observation comme pour l'écriture, sinon on
+      // écrirait sur une sortie et on lirait la vitesse d'une autre.
+      if (declared?.outputKey && cal.outputKey && declared.outputKey !== cal.outputKey) {
+        warnings.push(
+          `${runtime.id} : le mappage de config.yaml (${declared.outputKey}) diffère de la sortie calibrée `
+          + `(${cal.outputKey}) — la calibration fait foi.`,
+        );
+      }
 
       if (cal.state === 'NOT_CALIBRATED' || !cal.outputKey) {
         runtime.controlState = 'BIOS_CONTROLLED';
@@ -267,6 +405,11 @@ export class FanEngine {
         warnings.push(`${runtime.id} : sortie calibrée absente — contrôle laissé au BIOS.`);
         continue;
       }
+
+      // La sortie calibrée existe : c'est elle que l'on observe, même si la prise
+      // de contrôle est ensuite refusée (état BIOS avec supervision complète).
+      runtime.monitorOutputKey = cal.outputKey;
+      runtime.mappingSource = 'calibration';
 
       // 2. Comparer les capacités : une perte de tachymètre change la donne.
       if (cal.tachIndex !== null && output.tachIndex === null) {
@@ -301,15 +444,26 @@ export class FanEngine {
       runtime.observedBiosMode = cal.biosEnableMode ?? output.currentEnableMode;
 
       // 4. Autorisation de prise de contrôle.
+      // Supervision tachymétrique seule : caractéristique matérielle connue
+      // (fan_configs.monitoringOnly), prioritaire sur tout état de calibration —
+      // même un `state === 'AUTHORIZED'` hérité d'avant ce correctif ne doit
+      // jamais reprendre le contrôle logiciel.
+      if (runtime.config.monitoringOnly) {
+        runtime.controlState = 'BIOS_CONTROLLED';
+        this.reconcileOrphanedManualMode(runtime, cal);
+        continue;
+      }
       const authorized = cal.state === 'AUTHORIZED';
       const biosReturnOk = !this.deps.config.fanControl.requireBiosReturnValidation
         || cal.biosReturn === 'CONFIRMED';
       if (!authorized) {
-        runtime.controlState = cal.state === 'RESTRICTED' ? 'BIOS_CONTROLLED' : 'BIOS_CONTROLLED';
+        runtime.controlState = 'BIOS_CONTROLLED';
+        this.reconcileOrphanedManualMode(runtime, cal);
         continue;
       }
       if (!biosReturnOk) {
         runtime.controlState = 'BIOS_CONTROLLED';
+        this.reconcileOrphanedManualMode(runtime, cal);
         warnings.push(`${runtime.id} : retour BIOS non confirmé — contrôle logiciel automatique refusé.`);
         continue;
       }
@@ -318,6 +472,76 @@ export class FanEngine {
     }
 
     this.warnings = warnings;
+  }
+
+  /** Filet de sécurité indépendant des sessions de calibration : une sortie
+   *  censée être sous BIOS mais dont le pilote rapporte encore le mode manuel
+   *  est ramenée de force au BIOS. Couvre les cas qu'aucun chemin applicatif
+   *  n'a anticipés (arrêt non-gracieux du processus, session jamais fermée
+   *  avant un redémarrage, etc.) — indépendamment de la cause exacte. Appelée
+   *  au démarrage (`evaluateControlTakeover` initial) et à chaque tick pour
+   *  toute sortie non suspendue et non sous contrôle logiciel. */
+  private reconcileOrphanedManualMode(runtime: OutputRuntime, cal: CalibrationRecord): void {
+    // Défense en profondeur : les appelants excluent déjà les sessions actives
+    // et les sorties légitimement sous contrôle logiciel, mais cette fonction
+    // ne doit jamais en dépendre uniquement pour rester un filet de sécurité
+    // fiable même si un appelant futur oublie ce garde-fou.
+    if (runtime.suspendedForCalibration || runtime.controlState === 'SOFTWARE_CONTROLLED') return;
+
+    // Après un reset() en cours de session (ou toute perte de l'enregistrement
+    // de calibration), cal.outputKey est nul : on retombe sur le mappage
+    // déclaratif stable de config.yaml, déjà résolu et vérifié contre le
+    // contrôleur et l'index PWM réels par applyDeclaredMapping().
+    const declared = this.mapping.get(runtime.id);
+    const outputKey = cal.outputKey ?? declared?.outputKey ?? null;
+    if (!outputKey) return;
+    const output = this.deps.hwmon.getOutput(outputKey);
+    if (!output?.enablePath) return;
+
+    const manualMode = cal.manualEnableMode ?? MANUAL_ENABLE_MODE;
+    const current = this.deps.hwmon.readEnableMode(outputKey);
+    if (current === null || current !== manualMode) return;
+
+    // Mode BIOS attendu : celui mémorisé par la calibration si disponible,
+    // sinon le mode majoritaire observé sur les autres sorties du même
+    // contrôleur. Jamais `output.currentEnableMode` seul : capturé à la
+    // dernière découverte, il peut déjà refléter la sortie corrompue elle-même
+    // si la découverte a eu lieu après coup (exactement le cas qui nous occupe).
+    const expectedBios = cal.biosEnableMode
+      ?? this.inferBiosModeFromSiblings(output.controller.key, outputKey, manualMode);
+    if (expectedBios === null || expectedBios === current) return;
+
+    try {
+      this.deps.hwmon.writeEnableMode(outputKey, expectedBios);
+      log.warn('Sortie manuelle orpheline réconciliée — restitution BIOS forcée', {
+        fanId: runtime.id, outputKey, from: current, to: expectedBios,
+      });
+      this.emitEvent({
+        category: 'fan', level: 'warning', targetLabel: runtime.config.displayName,
+        message: 'Sortie trouvée en mode manuel sans autorisation valide — restituée au BIOS automatiquement.',
+      });
+    } catch (err) {
+      log.error('Réconciliation impossible : écriture du mode BIOS refusée', { fanId: runtime.id, error: err });
+    }
+  }
+
+  /** Mode d'activation majoritaire parmi les autres sorties du même
+   *  contrôleur (à l'exclusion du mode manuel) — référence quand aucun mode
+   *  BIOS connu n'est mémorisé pour la sortie orpheline elle-même. */
+  private inferBiosModeFromSiblings(controllerKey: string, excludeOutputKey: string, manualMode: number): number | null {
+    const counts = new Map<number, number>();
+    for (const o of this.deps.hwmon.cached().pwmOutputs) {
+      if (o.controller.key !== controllerKey || o.key === excludeOutputKey) continue;
+      const mode = this.deps.hwmon.readEnableMode(o.key);
+      if (mode === null || mode === manualMode) continue;
+      counts.set(mode, (counts.get(mode) ?? 0) + 1);
+    }
+    let best: number | null = null;
+    let bestCount = 0;
+    for (const [mode, count] of counts) {
+      if (count > bestCount) { best = mode; bestCount = count; }
+    }
+    return best;
   }
 
   private invalidate(runtime: OutputRuntime, reason: string): void {
@@ -397,8 +621,13 @@ export class FanEngine {
     for (const runtime of this.outputs.values()) {
       if (runtime.suspendedForCalibration) {
         // La calibration pilote cette sortie : on se contente d'observer.
-        runtime.rpm = runtime.boundOutputKey ? this.deps.hwmon.readRpm(runtime.boundOutputKey) : null;
+        this.readRpm(runtime);
         continue;
+      }
+      // Filet de sécurité continu : une sortie non autorisée ne doit jamais
+      // rester en mode manuel, quelle qu'en soit la cause.
+      if (runtime.controlState !== 'SOFTWARE_CONTROLLED') {
+        this.reconcileOrphanedManualMode(runtime, runtime.calibration);
       }
       this.tickOutput(runtime, now, config);
     }
@@ -537,17 +766,21 @@ export class FanEngine {
       this.writePwm(runtime, pwm, config);
     } else {
       // Sous contrôle BIOS : on observe sans écrire.
-      runtime.pwm = runtime.boundOutputKey
-        ? this.deps.hwmon.readPwmPercent(runtime.boundOutputKey) ?? 0
+      runtime.pwm = runtime.monitorOutputKey
+        ? this.deps.hwmon.readPwmPercent(runtime.monitorOutputKey) ?? 0
         : 0;
     }
 
     // --- 6. Retour tachymétrique ---
-    runtime.rpm = runtime.boundOutputKey ? this.deps.hwmon.readRpm(runtime.boundOutputKey) : null;
+    this.readRpm(runtime);
 
     // --- 7. Ventilateur bloqué ---
-    const hasTach = runtime.boundOutputKey
-      ? (this.deps.hwmon.getOutput(runtime.boundOutputKey)?.tachPath ?? null) !== null
+    // La détection s'appuie sur le canal RPM effectivement associé à cette
+    // sortie — celui du mappage déclaré s'il existe, sinon celui confirmé par la
+    // calibration. Sans canal, elle reste désactivée : mieux vaut ne rien
+    // détecter que déclencher sur la vitesse d'un autre ventilateur.
+    const hasTach = runtime.monitorOutputKey
+      ? (this.deps.hwmon.getOutput(runtime.monitorOutputKey)?.tachPath ?? null) !== null
       : false;
     const stallResult = updateStall(
       runtime.stall,
@@ -595,6 +828,27 @@ export class FanEngine {
         : runtime.controlState === 'BIOS_CONTROLLED'
           ? 'unknown'
           : 'normal';
+  }
+
+  /** Relève la vitesse et **la qualifie**.
+   *
+   *  Une lecture manquante, non numérique ou négative n'est pas convertie en 0 :
+   *  elle reste `null` avec la provenance `unavailable`. Un 0 fabriqué serait
+   *  indiscernable d'un ventilateur réellement arrêté, à l'écran comme dans
+   *  l'historique. Cette absence ne modifie aucune consigne : elle neutralise la
+   *  détection de blocage (cf. `updateStall`) sans jamais faire monter le PWM. */
+  private readRpm(runtime: OutputRuntime): void {
+    if (!runtime.monitorOutputKey) {
+      runtime.rpm = null;
+      runtime.rpmSource = 'unavailable';
+      return;
+    }
+    const raw = this.deps.hwmon.readRpm(runtime.monitorOutputKey);
+    const valid = raw !== null && Number.isFinite(raw) && raw >= 0;
+    runtime.rpm = valid ? raw : null;
+    runtime.rpmSource = !valid
+      ? 'unavailable'
+      : this.deps.hwmon.kind === 'simulated' ? 'simulated' : 'measured';
   }
 
   private writePwm(runtime: OutputRuntime, pwm: number, config: AppConfig): void {
@@ -772,8 +1026,16 @@ export class FanEngine {
   rediscover(): void {
     this.deps.hwmon.discover();
     this.deps.sensors.refreshMap();
+    // Le mappage est re-résolu contre la nouvelle découverte : si les `hwmonN`
+    // ont été renumérotés, les mêmes sorties physiques sont retrouvées.
+    this.applyDeclaredMapping();
     this.restoreTachBindings();
     this.evaluateControlTakeover();
+  }
+
+  /** Mappage déclaratif tel qu'il a été résolu — exposé pour le diagnostic. */
+  declaredMapping(): ResolvedFanMapping[] {
+    return [...this.mapping.values()];
   }
 
   // =====================================================================
@@ -828,6 +1090,7 @@ export class FanEngine {
       mode: this.deps.mode,
       loopIntervalMs: this.deps.config.fanControl.loopIntervalMs,
       failsafe: [...this.outputs.values()].some((o) => o.controlState === 'FAILSAFE'),
+      unconnectedOutputs: this.unconnectedState(),
       outputs: [...this.outputs.values()].map((o): FanOutputState => ({
         id: o.id,
         controlState: o.controlState,
@@ -835,6 +1098,7 @@ export class FanEngine {
         pwm: o.pwm,
         requestedPwm: o.requestedPwm,
         rpm: o.rpm,
+        rpmSource: o.rpmSource,
         refTemp: o.refTemp,
         sensorLostSince: o.sensorLostSince,
         stalled: o.stalled,
@@ -843,6 +1107,12 @@ export class FanEngine {
         lastWriteError: o.lastWriteError,
         writeFailures: o.writeFailures,
         boundOutputKey: o.boundOutputKey,
+        monitorOutputKey: o.monitorOutputKey,
+        mappingSource: o.mappingSource,
+        connectorLabel: o.connectorLabel ?? o.id,
+        hwmonPath: o.monitorOutputKey
+          ? this.deps.hwmon.getOutput(o.monitorOutputKey)?.pwmPath ?? null
+          : null,
         severity: o.severity,
       })),
       warnings: this.warnings,

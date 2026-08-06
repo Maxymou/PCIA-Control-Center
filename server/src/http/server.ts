@@ -99,9 +99,16 @@ export async function buildHttpServer(ctx: ApiContext): Promise<FastifyInstance>
       prefix: '/',
       index: ['index.html'],
       // Les assets Vite sont horodatés : cache long, index.html jamais caché.
+      //
+      // `sw.js` et `manifest.webmanifest` doivent également échapper au cache du
+      // navigateur : un service worker figé par un cache HTTP survivrait à un
+      // redéploiement et continuerait de servir l'ancienne interface. C'est
+      // aussi ce qui rend le retour arrière possible (cf. docs/ROLLBACK.md).
       setHeaders(reply, path) {
         if (path.endsWith('index.html')) reply.header('Cache-Control', 'no-cache');
-        else if (path.includes('/assets/')) reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+        else if (path.endsWith('/sw.js') || path.endsWith('manifest.webmanifest')) {
+          reply.header('Cache-Control', 'no-cache');
+        } else if (path.includes('/assets/')) reply.header('Cache-Control', 'public, max-age=31536000, immutable');
       },
     });
     log.info('Front-end servi', { staticDir });

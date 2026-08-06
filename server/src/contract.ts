@@ -13,7 +13,17 @@ export type {
   BackendCapabilities,
   BackendMode,
   BackendSystemStatus,
+  BiosReturnResult,
+  CalibrationRecord,
+  CalibrationSession,
+  CalibrationStep,
   Connection,
+  ControllerIdentity,
+  DiscoveredPwmOutput,
+  DiscoveredTempSensor,
+  HwmonDiscovery,
+  RpmValidationResult,
+  TachObservation,
   ConnectionConflict,
   ConnectionOrigin,
   ConnectionStatus,
@@ -31,7 +41,9 @@ export type {
   HardwareMetrics,
   HistoryMarker,
   HistoryPoint,
+  RpmSource,
   SensorRef,
+  UnconnectedOutputState,
   Service,
   ServiceGroup,
   ServiceOrigin,
@@ -44,8 +56,9 @@ export type {
 import type {
   BackendCapabilities, BackendSystemStatus, CalibrationState as SharedCalibrationState,
   FanControlState as SharedFanControlState, FanCurve, FanId, FanOutputState as SharedFanOutputState,
-  HardwareId, Snapshot,
+  CalibrationRecord, CalibrationSession, Snapshot, UnconnectedOutputState as SharedUnconnected,
 } from '../../src/types/index.js';
+import type { CalibrationSession as EngineCalibrationSession } from './fan/calibration.js';
 
 // ---------- Sorties de ventilation ----------
 
@@ -58,107 +71,20 @@ export type FanControlState = SharedFanControlState;
 /** Progression de l'assistant de calibration pour une sortie. */
 export type CalibrationState = SharedCalibrationState;
 
-export type RpmValidationResult = 'CONFIRMED' | 'PROBABLE' | 'NOT_AVAILABLE' | 'INCONSISTENT' | 'FAILED';
-export type BiosReturnResult = 'CONFIRMED' | 'PROBABLE' | 'NOT_CONFIRMED' | 'IMPOSSIBLE' | 'UNKNOWN';
+/** Découverte hwmon, résultats de validation et enregistrements de calibration :
+ *  définis dans `src/types/index.ts` et ré-exportés ci-dessus, pour que le
+ *  front-end et le back-end partagent exactement les mêmes structures. */
 
-/** Identification stable d'un contrôleur hwmon, indépendante de l'index /sys. */
-export interface ControllerIdentity {
-  /** Empreinte stable calculée à partir des éléments ci-dessous. */
-  key: string;
-  /** Contenu de `name` (ex. nct6798, coretemp, nvme). */
-  driverName: string;
-  /** Pilote noyau réel (device/driver). */
-  kernelDriver: string | null;
-  /** Bus (pci, platform, i2c, acpi…). */
-  bus: string | null;
-  /** Adresse sur le bus (ex. 0000:00:1f.3, nct6775.2592). */
-  address: string | null;
-  /** MODALIAS relevé dans uevent. */
-  modalias: string | null;
-  /** Chemin /sys courant — informatif uniquement, jamais un identifiant. */
-  currentPath: string;
-}
-
-/** Une sortie PWM telle que découverte sur le système. */
-export interface DiscoveredPwmOutput {
-  /** Identifiant stable : `${controller.key}#pwm${index}`. */
-  key: string;
-  controller: ControllerIdentity;
-  /** Index sysfs (pwm1 -> 1). Peut changer : jamais utilisé seul comme identité. */
-  index: number;
-  pwmPath: string;
-  enablePath: string | null;
-  /** Modes acceptés par pwmN_enable, quand ils sont énumérables. */
-  supportedEnableModes: number[];
-  /** Mode courant lu dans pwmN_enable (null si non exposé). */
-  currentEnableMode: number | null;
-  currentPwm: number | null;
-  /** Entrée tachymétrique associée, si une corrélation a pu être établie. */
-  tachPath: string | null;
-  tachIndex: number | null;
-  currentRpm: number | null;
-  label: string | null;
-  writable: boolean;
-}
-
-/** Capteur de température découvert. */
-export interface DiscoveredTempSensor {
-  key: string;
-  controller: ControllerIdentity;
-  index: number;
-  path: string;
-  label: string | null;
-  valueC: number | null;
-  /** Identifiant matériel du front-end auquel ce capteur a été rattaché. */
-  mappedTo: HardwareId | null;
-}
-
-export interface HwmonDiscovery {
-  controllers: ControllerIdentity[];
-  pwmOutputs: DiscoveredPwmOutput[];
-  tempSensors: DiscoveredTempSensor[];
-  /** Entrées tachymétriques sans sortie PWM corrélée. */
-  orphanTachs: { key: string; controller: ControllerIdentity; index: number; path: string; rpm: number | null }[];
-  warnings: string[];
-}
-
-/** Enregistrement de calibration persisté pour une sortie logique. */
-export interface CalibrationRecord {
-  fanId: FanId;
-  state: CalibrationState;
-  /** Identité stable de la sortie PWM retenue. */
-  outputKey: string | null;
-  controllerKey: string | null;
-  controllerDriver: string | null;
-  controllerAddress: string | null;
-  /** Index PWM/tach au moment de la calibration (informatif). */
-  pwmIndex: number | null;
-  tachIndex: number | null;
-  /** Chemins observés lors de la calibration — informatifs, revalidés au démarrage. */
-  lastPwmPath: string | null;
-  lastTachPath: string | null;
-  assignedHardware: HardwareId | 'none' | 'custom' | null;
-  customHardwareLabel: string | null;
-  rpmValidation: RpmValidationResult | null;
-  /** Seuil de démarrage observé (PWM en %). */
-  startupPwm: number | null;
-  /** Minimum retenu après marge de sécurité (PWM en %). */
-  minimumPwm: number | null;
-  minRpmObserved: number | null;
-  maxRpmObserved: number | null;
-  softwareControlValidated: boolean;
-  biosReturn: BiosReturnResult | null;
-  /** Mode pwmN_enable observé comme « BIOS/automatique » pour cette sortie. */
-  biosEnableMode: number | null;
-  /** Mode pwmN_enable permettant le pilotage manuel. */
-  manualEnableMode: number | null;
-  biosVersion: string | null;
-  kernelVersion: string | null;
-  calibratedAt: number | null;
-  notes: string | null;
-  /** Invalidé si le matériel a changé depuis la calibration. */
-  invalidatedReason: string | null;
-}
+/** Garde de conformité — vérifiée à la compilation, effacée à l'exécution.
+ *
+ *  Le moteur de ventilation (`fan/calibration.ts`) reste la source de la session
+ *  réellement produite ; il n'est pas modifié. Cette assertion garantit que la
+ *  structure partagée avec le front-end lui reste identique : toute divergence
+ *  introduite plus tard casse le build au lieu de produire silencieusement une
+ *  interface d'assistant désynchronisée du moteur. */
+type Conforms<Actual extends Expected, Expected> = Actual;
+export type _CalibrationSessionConformance =
+  Conforms<EngineCalibrationSession, CalibrationSession>;
 
 /** État publié par le moteur de ventilation (fichier + WebSocket). */
 export interface FanEngineState {
@@ -170,6 +96,8 @@ export interface FanEngineState {
   /** Vrai si au moins une sortie est en FAILSAFE. */
   failsafe: boolean;
   outputs: FanOutputState[];
+  /** Connecteurs déclarés non raccordés : connus, jamais pilotés. */
+  unconnectedOutputs: SharedUnconnected[];
   warnings: string[];
 }
 
@@ -189,6 +117,7 @@ export type SystemStatus = BackendSystemStatus;
 export type ServerSnapshot = Snapshot & {
   system: SystemStatus;
   fanOutputs: FanOutputState[];
+  unconnectedOutputs: SharedUnconnected[];
   calibration: CalibrationRecord[];
 };
 

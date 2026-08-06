@@ -3,12 +3,23 @@ import { useConfigStore } from '../../store/useConfigStore';
 import { useUiStore } from '../../store/useUiStore';
 import { StatusDot } from '../../components/Common';
 import { FAN_MODE_LABELS } from '../../utils/labels';
-import { round1 } from '../../utils/format';
+import { fmtRpmShort, rpmAriaLabel, round1 } from '../../utils/format';
+import type { HardwareId } from '../../types';
 
 export function FanList() {
   const fanConfigs = useConfigStore((s) => s.fanConfigs);
   const fansLive = useLiveStore((s) => s.snap.fans);
+  const hardware = useLiveStore((s) => s.snap.hardware);
+  const unconnected = useLiveStore((s) => s.snap.unconnectedOutputs);
   const ui = useUiStore();
+
+  /** Matériel refroidi par une sortie, en clair. Le nom vient de l'inventaire
+   *  remonté par le back-end : aucun libellé matériel n'est figé ici. */
+  const hardwareLabel = (id: HardwareId | 'none' | 'custom', custom?: string): string => {
+    if (id === 'custom') return custom ?? 'matériel personnalisé';
+    if (id === 'none') return 'aucun matériel';
+    return hardware.find((h) => h.id === id)?.name ?? id;
+  };
 
   return (
     <div className="card card-pad">
@@ -27,48 +38,45 @@ export function FanList() {
               <div className="row">
                 <StatusDot sev={lv?.status ?? 'unknown'} pulse={lv?.status === 'critical'} />
                 <strong>{f.displayName}</strong>
+                {/* Connecteur physique de la carte mère, puis matériel refroidi. */}
                 <span className="muted small mono">{f.id}</span>
               </div>
-              <div className="mono small" style={{ textAlign: 'right' }}>
-                {lv ? `${lv.rpm} RPM` : '—'}
+              <div
+                className="mono small"
+                style={{ textAlign: 'right' }}
+                title={lv?.rpmSource === 'simulated' ? 'Valeur simulée (mode démonstration)' : undefined}
+              >
+                <span aria-hidden="true">{fmtRpmShort(lv?.rpm, lv?.rpmSource)}</span>
+                <span className="sr-only">{rpmAriaLabel(lv?.rpm, lv?.rpmSource)}</span>
               </div>
-              <div className="small muted">{FAN_MODE_LABELS[f.mode]}</div>
+              <div className="small muted">
+                {FAN_MODE_LABELS[f.mode]} · {hardwareLabel(f.assignedHardware, f.customHardwareLabel)}
+              </div>
               <div className="mono small muted" style={{ textAlign: 'right' }}>
                 {lv ? `${lv.pwm} % · ${round1(lv.refTemp)} °C` : ''}
               </div>
             </div>
           );
         })}
-      </div>
-    </div>
-  );
-}
 
-/** Détails du matériel sélectionné dans le schéma. */
-export function HardwareDetails() {
-  const id = useUiStore((s) => s.selectedHardwareId);
-  const hardware = useLiveStore((s) => s.snap.hardware);
-  const h = hardware.find((x) => x.id === id);
-  if (!h || !h.installed) return null;
-  const m = h.metrics;
-  return (
-    <div className="card card-pad">
-      <div className="spread">
-        <p className="card-title" style={{ margin: 0 }}>{h.name}</p>
-        <StatusDot sev={m.status} pulse={m.status === 'critical'} />
+        {/* Connecteurs présents mais non raccordés. Ils apparaissent pour que
+            l'inventaire soit complet, sans être sélectionnables : il n'y a rien
+            à régler, et leur 0 RPM est une mesure réelle. */}
+        {unconnected?.map((u) => (
+          <div key={u.label} className="fan-row is-unconnected" aria-disabled="true">
+            <div className="row">
+              <StatusDot sev="unknown" />
+              <span className="muted">Non branché</span>
+              <span className="muted small mono">{u.label}</span>
+            </div>
+            <div className="mono small muted" style={{ textAlign: 'right' }}>
+              {fmtRpmShort(u.rpm, u.rpmSource)}
+            </div>
+            <div className="small muted">Aucun ventilateur raccordé</div>
+            <div />
+          </div>
+        ))}
       </div>
-      <dl className="kv" style={{ marginTop: 8 }}>
-        {h.model && <><dt>Modèle</dt><dd>{h.model}</dd></>}
-        {h.pcieSlot && <><dt>Emplacement</dt><dd className="mono">{h.pcieSlot}</dd></>}
-        {m.temp !== undefined && <><dt>Température</dt><dd className={`mono sev-${m.status}`}>{m.temp.toFixed(1)} °C</dd></>}
-        {m.load !== undefined && <><dt>Charge</dt><dd className="mono">{m.load} %</dd></>}
-        {m.freq !== undefined && <><dt>Fréquence</dt><dd className="mono">{m.freq} MHz</dd></>}
-        {m.power !== undefined && <><dt>Consommation</dt><dd className="mono">{m.power} W</dd></>}
-        {m.memUsed !== undefined && <><dt>Mémoire</dt><dd className="mono">{m.memUsed.toFixed(1)} / {m.memTotal} Go</dd></>}
-        {m.capacity !== undefined && <><dt>Capacité</dt><dd className="mono">{m.used} / {m.capacity} Go</dd></>}
-        {m.health !== undefined && <><dt>État de santé</dt><dd className="mono">{m.health} %</dd></>}
-        {m.activity !== undefined && <><dt>Activité</dt><dd className="mono">{m.activity} %</dd></>}
-      </dl>
     </div>
   );
 }

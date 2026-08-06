@@ -37,7 +37,12 @@ export function ServiceNode({ data }: NodeProps) {
         </span>
         <span className="badge outline">{SERVICE_TYPE_LABELS[s.type]}</span>
         {s.isNew && <span className="badge accent">Nouveau</span>}
-        {s.note && <span className="badge outline" data-tip="Contient une note">📝</span>}
+        {s.note && (
+          <span className="badge outline" title={`Note : ${s.note}`}>
+            <span aria-hidden="true">📝</span>
+            <span className="sr-only">Contient une note</span>
+          </span>
+        )}
         {hasAlert && <span className="badge warning">⚠</span>}
       </div>
       <Handle type="source" position={Position.Right} style={{ background: 'var(--border-strong)' }} />
@@ -62,7 +67,12 @@ export function GroupNode({ data }: NodeProps) {
     >
       <div className="g-head" style={{ color: group.color ?? 'var(--text-2)' }}>
         <span>▣ {group.name}</span>
-        {group.note && <span data-tip="Contient une note">📝</span>}
+        {group.note && (
+        <span title={`Note : ${group.note}`}>
+          <span aria-hidden="true">📝</span>
+          <span className="sr-only">Contient une note</span>
+        </span>
+      )}
       </div>
     </div>
   );

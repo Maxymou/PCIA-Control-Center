@@ -2,10 +2,16 @@ import { useState } from 'react';
 import { useReactFlow } from '@xyflow/react';
 import { useConfigStore } from '../../store/useConfigStore';
 import { SERVICE_STATUS_LABELS, SERVICE_TYPE_LABELS } from '../../utils/labels';
+import { Tooltip } from '../../ui/Tooltip';
 
-export function GraphToolbar({ onOpen, onAutoLayout }: {
+export function GraphToolbar({ onOpen, onAutoLayout, view, onViewChange, graphControlsHidden }: {
   onOpen: (m: 'service' | 'connection' | 'group' | 'hidden') => void;
   onAutoLayout: () => void;
+  /** Présentation courante : graphe interactif ou liste. */
+  view: 'graph' | 'list';
+  onViewChange: (v: 'auto' | 'graph' | 'list') => void;
+  /** Masque les commandes propres au graphe quand la liste est affichée. */
+  graphControlsHidden: boolean;
 }) {
   const rf = useReactFlow();
   const cfg = useConfigStore();
@@ -19,32 +25,69 @@ export function GraphToolbar({ onOpen, onAutoLayout }: {
 
   return (
     <div className="graph-toolbar">
+      {/* Bascule graphe ↔ liste : les deux présentations donnent accès aux
+          mêmes services, aux mêmes connexions et aux mêmes actions. */}
+      <div className="segmented" role="group" aria-label="Présentation">
+        <button
+          type="button"
+          aria-pressed={view === 'graph'}
+          onClick={() => onViewChange('graph')}
+        >
+          <span aria-hidden="true">⬡</span> Graphe
+        </button>
+        <button
+          type="button"
+          aria-pressed={view === 'list'}
+          onClick={() => onViewChange('list')}
+        >
+          <span aria-hidden="true">☰</span> Liste
+        </button>
+      </div>
+      <div className="sep" />
       <div className="group">
         <button className="btn-primary btn-sm" onClick={() => onOpen('service')}>+ Service</button>
         <button className="btn-sm" onClick={() => onOpen('connection')}>+ Connexion</button>
         <button className="btn-sm" onClick={() => onOpen('group')}>+ Groupe</button>
       </div>
+      {!graphControlsHidden && (
+        <>
       <div className="sep" />
       <div className="group">
-        <button className="btn-sm" onClick={onAutoLayout} data-tip="Flux organisés de gauche à droite">
-          Organiser automatiquement
-        </button>
-        <button className="btn-sm btn-icon" data-tip="Ajuster à l’écran (F)" onClick={() => rf.fitView({ padding: 0.15 })}>⤢</button>
-        <button className="btn-sm btn-icon" data-tip="Centrer la vue" onClick={() => rf.setViewport({ x: 0, y: 0, zoom: 1 })}>⌖</button>
-        <button className="btn-sm btn-icon" data-tip="Zoom avant" onClick={() => rf.zoomIn()}>＋</button>
-        <button className="btn-sm btn-icon" data-tip="Zoom arrière" onClick={() => rf.zoomOut()}>－</button>
+        <Tooltip content="Réorganise les blocs, flux de gauche à droite">
+          <button className="btn-sm" onClick={onAutoLayout}>Organiser automatiquement</button>
+        </Tooltip>
+        <Tooltip content="Ajuster à l’écran (touche F)">
+          <button className="btn-sm btn-icon" aria-label="Ajuster à l’écran" onClick={() => rf.fitView({ padding: 0.15 })}>⤢</button>
+        </Tooltip>
+        <Tooltip content="Centrer la vue">
+          <button className="btn-sm btn-icon" aria-label="Centrer la vue" onClick={() => rf.setViewport({ x: 0, y: 0, zoom: 1 })}>⌖</button>
+        </Tooltip>
+        <Tooltip content="Zoom avant">
+          <button className="btn-sm btn-icon" aria-label="Zoom avant" onClick={() => rf.zoomIn()}>＋</button>
+        </Tooltip>
+        <Tooltip content="Zoom arrière">
+          <button className="btn-sm btn-icon" aria-label="Zoom arrière" onClick={() => rf.zoomOut()}>－</button>
+        </Tooltip>
       </div>
       <div className="sep" />
       <div className="group">
-        <button className="btn-sm btn-icon" data-tip="Annuler (Ctrl+Z)" onClick={cfg.undo} disabled={cfg.undoStack.length === 0}>↶</button>
-        <button className="btn-sm btn-icon" data-tip="Rétablir (Ctrl+Y)" onClick={cfg.redo} disabled={cfg.redoStack.length === 0}>↷</button>
+        <Tooltip content="Annuler la dernière modification (Ctrl+Z)">
+          <button className="btn-sm btn-icon" aria-label="Annuler" onClick={cfg.undo} disabled={cfg.undoStack.length === 0}>↶</button>
+        </Tooltip>
+        <Tooltip content="Rétablir (Ctrl+Y)">
+          <button className="btn-sm btn-icon" aria-label="Rétablir" onClick={cfg.redo} disabled={cfg.redoStack.length === 0}>↷</button>
+        </Tooltip>
       </div>
       <div className="sep" />
       <div className="group">
-        <button className="btn-sm" onClick={cfg.saveLayoutSnapshot} data-tip="Mémoriser la disposition actuelle">Mémoriser</button>
+        <Tooltip content="Mémoriser la disposition actuelle pour pouvoir y revenir">
+          <button className="btn-sm" onClick={cfg.saveLayoutSnapshot}>Mémoriser</button>
+        </Tooltip>
         <button className="btn-sm" onClick={cfg.restoreLayout} disabled={!cfg.savedLayout}>Restaurer la disposition</button>
         <button className="btn-sm" onClick={cfg.resetLayout}>Réinitialiser</button>
       </div>
+        </>
+      )}
       <div className="sep" />
       <div className="group" style={{ position: 'relative' }}>
         <button className="btn-sm" onClick={() => onOpen('hidden')}>

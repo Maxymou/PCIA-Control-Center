@@ -11,6 +11,13 @@ import {
 import { fmtDateTime } from '../../utils/format';
 import { ConnectionModal, ServiceModal } from './Modals';
 
+/** Couleurs d'accent proposées pour un groupe — issues de la palette de
+ *  courbes du design system, pas de valeurs inventées au fil du code. */
+const GROUP_COLORS = [
+  'var(--chart-1)', 'var(--chart-5)', 'var(--chart-2)',
+  'var(--chart-3)', 'var(--chart-6)', 'var(--chart-4)',
+];
+
 /** Champ note éditable avec enregistrement à la validation. */
 function NoteField({ value, onSave }: { value?: string; onSave: (v: string) => void }) {
   const [draft, setDraft] = useState(value ?? '');
@@ -238,9 +245,9 @@ function GroupDetails({ groupId }: { groupId: string }) {
         </label>
         <label className="field">Couleur d’accent
           <div className="row">
-            {['#3b82f6', '#7c6df2', '#3ecf8e', '#f5a524', '#6b7280', '#e35d8f'].map((c) => (
+            {GROUP_COLORS.map((c) => (
               <button key={c} className="btn-icon" aria-label={`Couleur ${c}`}
-                style={{ background: c, width: 24, height: 24, borderColor: group.color === c ? '#fff' : 'transparent' }}
+                style={{ background: c, width: 24, height: 24, borderColor: group.color === c ? 'var(--text)' : 'transparent' }}
                 onClick={() => cfg.updateGroup(group.id, { color: c })} />
             ))}
           </div>

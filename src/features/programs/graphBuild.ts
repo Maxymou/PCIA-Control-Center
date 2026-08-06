@@ -130,7 +130,7 @@ export function buildGraph(input: BuildInput): { nodes: Node[]; edges: Edge[] } 
       markerEnd: { type: MarkerType.ArrowClosed, color: isSel ? 'var(--accent)' : st.stroke, width: 16, height: 16 },
       label: badges.length ? badges.join(' · ') : undefined,
       labelStyle: { fill: 'var(--text-2)', fontSize: 10 },
-      labelBgStyle: { fill: '#14171c', fillOpacity: 0.9 },
+      labelBgStyle: { fill: 'var(--bg-raised)', fillOpacity: 0.9 },
       labelBgPadding: [4, 2],
       labelBgBorderRadius: 4,
       interactionWidth: 14,

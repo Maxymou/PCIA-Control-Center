@@ -24,6 +24,13 @@ import { PASSIVE_COOLING_FANS } from './defaults.js';
 
 const log = createLogger('fan.calibration');
 
+/** Fréquence maximale (et minimale) du filet de sécurité contre les sessions
+ *  abandonnées. La fréquence réelle est un dixième du délai configuré
+ *  (`calibration.sessionIdleTimeoutMs`), bornée à cet intervalle — utile en
+ *  production comme pour des tests avec un délai volontairement court. */
+const IDLE_CHECK_INTERVAL_MAX_MS = 30_000;
+const IDLE_CHECK_INTERVAL_MIN_MS = 1_000;
+
 export type CalibrationStep =
   | 'idle' | 'identify' | 'test-rpm' | 'detect-minimum'
   | 'test-software-control' | 'test-bios-return';
@@ -59,12 +66,47 @@ export interface CalibrationSession {
   lastError: string | null;
   /** Résultat de la dernière étape, à afficher dans l'assistant. */
   lastResult: Record<string, unknown> | null;
+  /** Dernière interaction (start, étape, confirmIdentification…) — sert au
+   *  filet de sécurité qui restitue le BIOS sur une session abandonnée. */
+  lastActivityAt: number;
 }
 
 export interface CalibrationDeps {
   engine: FanEngine;
   repos: import('../db/repositories.js').Repositories;
   onUpdate?: (fanId: FanId) => void;
+}
+
+/** Décision de `testRpm` — extraite en fonction pure pour être testable
+ *  directement avec des séries réelles, indépendamment du simulateur hwmon
+ *  et de ses délais. `plausibleMax` est déjà résolu par l'appelant selon
+ *  `PASSIVE_COOLING_FANS` (voir `testRpm`). */
+export function evaluateRpmSamples(
+  samples: { pwm: number; rpm: number | null }[],
+  plausibleMax: number,
+): { result: RpmValidationResult; minRpm: number | null; maxRpm: number | null } {
+  const valid = samples.filter((s) => s.rpm !== null) as { pwm: number; rpm: number }[];
+  if (valid.length < samples.length) {
+    return { result: 'INCONSISTENT', minRpm: null, maxRpm: null };
+  }
+  const minRpm = Math.min(...valid.map((v) => v.rpm));
+  const maxRpm = Math.max(...valid.map((v) => v.rpm));
+  const rising = valid.slice(0, 3);
+  const monotonic = rising[0].rpm <= rising[1].rpm && rising[1].rpm <= rising[2].rpm;
+  const spread = maxRpm > 0 ? (maxRpm - minRpm) / maxRpm : 0;
+  // Un RPM plausible reste dans une plage physique crédible. Les sorties de
+  // refroidissement passif (blowers 40 mm haute vitesse, ex. Tesla V100)
+  // dépassent légitimement 12 000 RPM — mesuré en production : ~15 340 RPM à
+  // 100 % sur du matériel sain (monotonic/spread/retour tous conformes).
+  const plausible = maxRpm > 100 && maxRpm < plausibleMax;
+  // Le retour après changement doit se rapprocher du palier initial.
+  const returned = Math.abs(valid[3].rpm - valid[0].rpm) < Math.max(200, valid[0].rpm * 0.35);
+  let result: RpmValidationResult;
+  if (!plausible) result = 'INCONSISTENT';
+  else if (monotonic && spread > 0.25 && returned) result = 'CONFIRMED';
+  else if (monotonic && spread > 0.1) result = 'PROBABLE';
+  else result = 'INCONSISTENT';
+  return { result, minRpm, maxRpm };
 }
 
 export class CalibrationController {
@@ -78,8 +120,40 @@ export class CalibrationController {
   private closing = false;
   /** Arrêt terminé : la base peut être fermée, plus aucun accès n'est tenté. */
   private closed = false;
+  private idleCheckTimer: ReturnType<typeof setInterval> | null = null;
 
-  constructor(private deps: CalibrationDeps) {}
+  constructor(private deps: CalibrationDeps) {
+    const timeoutMs = this.deps.engine.appConfig().calibration.sessionIdleTimeoutMs;
+    const checkInterval = Math.min(IDLE_CHECK_INTERVAL_MAX_MS, Math.max(IDLE_CHECK_INTERVAL_MIN_MS, timeoutMs / 10));
+    this.idleCheckTimer = setInterval(() => this.reapIdleSessions(), checkInterval);
+    this.idleCheckTimer.unref?.();
+  }
+
+  /** Filet de sécurité : une session sans aucune interaction depuis
+   *  `calibration.sessionIdleTimeoutMs` est traitée comme abandonnée — état
+   *  initial restauré, sortie rendue au BIOS, exactement comme `cancel()`.
+   *  Ne touche jamais une session `busy` (étape réellement en cours). */
+  private reapIdleSessions(): void {
+    if (this.closing) return;
+    const timeoutMs = this.deps.engine.appConfig().calibration.sessionIdleTimeoutMs;
+    const now = Date.now();
+    for (const [fanId, session] of [...this.sessions.entries()]) {
+      if (session.busy) continue;
+      if (now - session.lastActivityAt < timeoutMs) continue;
+      void this.abandonIdleSession(fanId, session);
+    }
+  }
+
+  private async abandonIdleSession(fanId: FanId, session: CalibrationSession): Promise<void> {
+    const idleMs = Date.now() - session.lastActivityAt;
+    log.warn('Session de calibration abandonnée — restitution automatique au BIOS', { fanId, idleMs });
+    await this.restoreInitial(session, 'session abandonnée (expiration)');
+    this.sessions.delete(fanId);
+    this.aborts.delete(fanId);
+    this.deps.engine.reloadCalibration(fanId);
+    this.deps.engine.resume(fanId);
+    this.notify(fanId);
+  }
 
   /** Attente interruptible : `shutdown()` la réveille immédiatement au lieu de
    *  laisser un timer survivre à la fermeture de la base. */
@@ -127,6 +201,17 @@ export class CalibrationController {
     if (!output) return { ok: false, error: 'Sortie PWM inconnue.' };
     if (!output.writable) return { ok: false, error: 'Sortie PWM non inscriptible : calibration impossible.' };
 
+    // Connecteur déclaré non raccordé : refusé d'emblée. La calibration fait
+    // monter la sortie à 100 % pour identifier le ventilateur — inutile et
+    // trompeur sur un connecteur dont on sait qu'il ne pilote rien.
+    const unconnectedLabel = this.deps.engine.unconnectedLabelFor(outputKey);
+    if (unconnectedLabel) {
+      return {
+        ok: false,
+        error: `${unconnectedLabel} est déclaré non branché dans la configuration : calibration refusée.`,
+      };
+    }
+
     // Une seule sortie calibrée à la fois : le RPM observé doit être attribuable.
     if ([...this.sessions.values()].some((s) => s.busy)) {
       return { ok: false, error: 'Une autre calibration est en cours.' };
@@ -136,6 +221,19 @@ export class CalibrationController {
       .find((r) => r.fanId !== fanId && r.outputKey === outputKey && r.state !== 'NOT_CALIBRATED');
     if (conflict) {
       return { ok: false, error: `Cette sortie PWM est déjà attribuée à ${conflict.fanId}.` };
+    }
+
+    // Validation stricte fanId ↔ outputKey : quand config.yaml déclare un pwm
+    // stable pour cette sortie (fans.mapping), le pwm réellement choisi doit
+    // correspondre. Empêche exactement le croisement constaté en production
+    // (SYS_FAN3 calibré sur pwm5 / SYS_FAN4 sur pwm4, au lieu de pwm4/pwm5).
+    const declaredMapping = this.deps.engine.appConfig().fans?.mapping?.[fanId];
+    if (declaredMapping?.pwm !== undefined && declaredMapping.pwm !== output.index) {
+      return {
+        ok: false,
+        error: `Sortie pwm${output.index} incohérente avec le mappage déclaré pour ${fanId} `
+          + `(config.yaml attend pwm${declaredMapping.pwm}). Vérifier le câblage avant de continuer.`,
+      };
     }
 
     const runtime = this.deps.engine.runtimeFor(fanId);
@@ -157,6 +255,7 @@ export class CalibrationController {
       lastObservations: [],
       lastError: null,
       lastResult: null,
+      lastActivityAt: Date.now(),
     };
     this.sessions.set(fanId, session);
     this.aborts.set(fanId, false);
@@ -227,24 +326,42 @@ export class CalibrationController {
    *  `unhandledRejection`. La lecture en base est incluse dans le `try` : après
    *  `shutdown()` la connexion SQLite peut être fermée, et la restitution
    *  matérielle doit malgré tout être tentée. */
-  private async restoreInitial(session: CalibrationSession, cause: string): Promise<void> {
+  /** Restaure l'état initial d'une session. Retourne `true` seulement si le
+   *  mode d'activation cible a été **vérifié par relecture** (ou s'il n'y
+   *  avait aucun mode à restaurer) — jamais une simple absence d'exception.
+   *  `reset()` s'appuie sur ce retour pour décider de conserver ou non la
+   *  session en cas d'échec (voir §16.9). */
+  private async restoreInitial(session: CalibrationSession, cause: string): Promise<boolean> {
     const hwmon = this.deps.engine.hwmonBackend();
+    let targetMode = session.initial.enableMode;
     try {
       if (session.initial.pwmPercent !== null) {
         hwmon.writePwmPercent(session.outputKey, session.initial.pwmPercent);
       }
-      if (session.initial.enableMode !== null) {
-        hwmon.writeEnableMode(session.outputKey, session.initial.enableMode);
+      if (targetMode !== null) {
+        hwmon.writeEnableMode(session.outputKey, targetMode);
       } else if (!this.closed) {
         const record = this.deps.repos.calibration.get(session.fanId);
         if (record.biosReturn === 'CONFIRMED' && record.biosEnableMode !== null) {
           // Mode initial inconnu : retour BIOS si celui-ci a été validé.
-          hwmon.writeEnableMode(session.outputKey, record.biosEnableMode);
+          targetMode = record.biosEnableMode;
+          hwmon.writeEnableMode(session.outputKey, targetMode);
+        }
+      }
+      if (targetMode !== null) {
+        const after = hwmon.readEnableMode(session.outputKey);
+        if (after !== targetMode) {
+          log.error('Restauration de l’état initial non vérifiée', {
+            fanId: session.fanId, cause, expected: targetMode, actual: after,
+          });
+          return false;
         }
       }
       log.info('État initial restauré', { fanId: session.fanId, cause });
+      return true;
     } catch (err) {
       log.error('Restauration de l’état initial impossible', { fanId: session.fanId, cause, error: err });
+      return false;
     }
   }
 
@@ -266,6 +383,10 @@ export class CalibrationController {
   async shutdown(): Promise<void> {
     if (this.closing) return;
     this.closing = true;
+    if (this.idleCheckTimer) {
+      clearInterval(this.idleCheckTimer);
+      this.idleCheckTimer = null;
+    }
 
     for (const fanId of this.sessions.keys()) this.aborts.set(fanId, true);
 
@@ -348,6 +469,7 @@ export class CalibrationController {
     const session = this.sessions.get(fanId);
     if (!session) return { ok: false, error: 'Aucune calibration en cours.' };
     if (session.busy) return { ok: false, error: 'Étape en cours.' };
+    session.lastActivityAt = Date.now();
     const record = this.deps.repos.calibration.get(fanId);
 
     if (input.inconclusive) {
@@ -390,6 +512,15 @@ export class CalibrationController {
       const output = hwmon.getOutput(session.outputKey)!;
       const record = this.deps.repos.calibration.get(fanId);
 
+      // Sans identification humaine confirmée, aucune étape suivante ne doit
+      // agir sur le matériel : on ne sait pas quel ventilateur physique répond
+      // réellement à cette sortie (voir `confirmIdentification`).
+      if (record.assignedHardware === null) {
+        session.lastError = 'Identification non confirmée : relancez l’étape « Identification physique ».';
+        session.message = session.lastError;
+        return;
+      }
+
       if (output.tachPath === null) {
         session.lastResult = { result: 'NOT_AVAILABLE' as RpmValidationResult };
         session.message = 'Aucun retour tachymétrique : la sortie sera restreinte.';
@@ -406,28 +537,8 @@ export class CalibrationController {
         samples.push({ pwm: levels[i], rpm: hwmon.readRpm(session.outputKey) });
       }
 
-      const valid = samples.filter((s) => s.rpm !== null) as { pwm: number; rpm: number }[];
-      let result: RpmValidationResult;
-      let minRpm: number | null = null;
-      let maxRpm: number | null = null;
-
-      if (valid.length < samples.length) {
-        result = 'INCONSISTENT';
-      } else {
-        minRpm = Math.min(...valid.map((v) => v.rpm));
-        maxRpm = Math.max(...valid.map((v) => v.rpm));
-        const rising = valid.slice(0, 3);
-        const monotonic = rising[0].rpm <= rising[1].rpm && rising[1].rpm <= rising[2].rpm;
-        const spread = maxRpm > 0 ? (maxRpm - minRpm) / maxRpm : 0;
-        // Un RPM plausible reste dans une plage physique crédible.
-        const plausible = maxRpm > 100 && maxRpm < 12_000;
-        // Le retour après changement doit se rapprocher du palier initial.
-        const returned = Math.abs(valid[3].rpm - valid[0].rpm) < Math.max(200, valid[0].rpm * 0.35);
-        if (!plausible) result = 'INCONSISTENT';
-        else if (monotonic && spread > 0.25 && returned) result = 'CONFIRMED';
-        else if (monotonic && spread > 0.1) result = 'PROBABLE';
-        else result = 'INCONSISTENT';
-      }
+      const plausibleMax = PASSIVE_COOLING_FANS.includes(fanId) ? config.passiveRpmPlausibleMax : 12_000;
+      const { result, minRpm, maxRpm } = evaluateRpmSamples(samples, plausibleMax);
 
       session.lastResult = { result, samples, minRpm, maxRpm };
       session.message = `Retour RPM : ${result}.`;
@@ -449,6 +560,13 @@ export class CalibrationController {
       const hwmon = this.deps.engine.hwmonBackend();
       const config = this.deps.engine.appConfig().calibration;
       const record = this.deps.repos.calibration.get(fanId);
+
+      if (record.assignedHardware === null) {
+        session.lastError = 'Identification non confirmée : relancez l’étape « Identification physique ».';
+        session.message = session.lastError;
+        return;
+      }
+
       const hasTach = hwmon.getOutput(session.outputKey)?.tachPath !== null;
 
       if (!hasTach) {
@@ -516,6 +634,13 @@ export class CalibrationController {
     return this.runStep(fanId, 'test-software-control', async (session, ctx) => {
       const hwmon = this.deps.engine.hwmonBackend();
       const output = hwmon.getOutput(session.outputKey)!;
+
+      // Garde avant toute prise de contrôle logiciel : voir testRpm/detectMinimum.
+      if (this.deps.repos.calibration.get(fanId).assignedHardware === null) {
+        session.lastError = 'Identification non confirmée : relancez l’étape « Identification physique ».';
+        session.message = session.lastError;
+        return;
+      }
 
       await this.ensureManualMode(session);
       // Relu APRÈS le passage en mode manuel : cette étape enregistre les modes
@@ -635,6 +760,12 @@ export class CalibrationController {
       const sysInfo = readSystemInfo();
       let record = this.deps.repos.calibration.get(fanId);
 
+      if (record.assignedHardware === null) {
+        session.lastError = 'Identification non confirmée : relancez l’étape « Identification physique ».';
+        session.message = session.lastError;
+        return;
+      }
+
       if (!output.enablePath) {
         // Sans pwm_enable, il n'existe aucun moyen de rendre la main au BIOS.
         session.lastResult = { result: 'IMPOSSIBLE' as BiosReturnResult };
@@ -718,12 +849,33 @@ export class CalibrationController {
   authorize(fanId: FanId, opts: { acceptRestricted?: boolean } = {}): { ok: boolean; error?: string; record?: CalibrationRecord } {
     const session = this.sessions.get(fanId);
     if (session?.busy) return { ok: false, error: 'Étape en cours.' };
+
+    // Supervision tachymétrique seule : caractéristique matérielle connue
+    // (fan_configs), absolue — retour anticipé, avant toute autre logique,
+    // pour qu'aucun chemin (y compris `acceptRestricted`) ne puisse jamais
+    // renvoyer `ok: true`, même pour un état seulement « restreint ».
+    if (this.deps.repos.fanConfigs.get(fanId)?.monitoringOnly) {
+      return {
+        ok: false,
+        error: 'Autorisation refusée : supervision tachymétrique uniquement — contrôle de vitesse indisponible.',
+      };
+    }
+
     const record = this.deps.repos.calibration.get(fanId);
     const engineConfig = this.deps.engine.appConfig();
     const missing: string[] = [];
 
     if (!record.outputKey) missing.push('sortie PWM non associée');
     if (record.assignedHardware === null) missing.push('matériel non identifié');
+    // Cohérence avec l'affectation déclarée dans fan_configs (source de vérité
+    // pour « quel matériel cette sortie refroidit ») : évite qu'une étiquette
+    // erronée choisie pendant l'identification (ex. SYS_FAN1 étiqueté « cpu »
+    // au lieu de « case-rear ») ne passe jamais autorisée.
+    const declaredHardware = this.deps.repos.fanConfigs.get(fanId)?.assignedHardware;
+    if (record.assignedHardware !== null && declaredHardware !== undefined
+      && record.assignedHardware !== declaredHardware) {
+      missing.push(`affectation matérielle incohérente (calibration: ${record.assignedHardware}, configuration: ${declaredHardware})`);
+    }
     if (!record.softwareControlValidated) missing.push('contrôle logiciel non validé');
     if (record.rpmValidation === 'FAILED' || record.rpmValidation === 'INCONSISTENT') {
       missing.push('retour RPM incohérent');
@@ -762,13 +914,43 @@ export class CalibrationController {
     return { ok: true, record: authorized };
   }
 
-  /** Réinitialise complètement la calibration d'une sortie. */
-  reset(fanId: FanId): void {
+  /** Réinitialise complètement la calibration d'une sortie.
+   *
+   *  §16.9 — si une session est encore ouverte, sa restitution BIOS doit être
+   *  **vérifiée avant** toute suppression : sans cela, une sortie laissée en
+   *  mode manuel par une étape en cours (identification, test RPM…) devient
+   *  orpheline dès que `output_key`/`assigned_hardware` sont effacés — plus
+   *  aucun mécanisme (y compris la réconciliation) ne peut alors la
+   *  retrouver. Même niveau d'exigence que `cancel()`. */
+  async reset(fanId: FanId): Promise<{ ok: boolean; error?: string }> {
+    const session = this.sessions.get(fanId);
+    if (session) {
+      if (session.busy) {
+        return { ok: false, error: 'Étape en cours : impossible de réinitialiser maintenant.' };
+      }
+      const enableModeBefore = safe(() => this.deps.engine.hwmonBackend().readEnableMode(session.outputKey));
+      log.info('Réinitialisation demandée', { fanId, outputKey: session.outputKey, enableModeBefore });
+
+      const restored = await this.restoreInitial(session, 'réinitialisation');
+      if (!restored) {
+        log.error('Réinitialisation refusée : restitution BIOS non confirmée, session conservée', {
+          fanId, outputKey: session.outputKey,
+        });
+        return {
+          ok: false,
+          error: 'Restitution au BIOS non confirmée : la sortie reste sous contrôle logiciel. '
+            + 'La calibration n’a pas été réinitialisée — réessayez, ou utilisez l’arrêt d’urgence.',
+        };
+      }
+      this.sessions.delete(fanId);
+      this.aborts.delete(fanId);
+    }
+
     this.deps.repos.calibration.reset(fanId);
-    this.sessions.delete(fanId);
     this.deps.engine.reloadCalibration(fanId);
     this.deps.engine.resume(fanId);
     this.notify(fanId);
+    return { ok: true };
   }
 
   // =====================================================================
@@ -826,6 +1008,7 @@ export class CalibrationController {
     if (!session) return { ok: false, error: 'Aucune calibration en cours pour cette sortie.' };
     if (session.busy) return { ok: false, error: 'Une étape est déjà en cours.' };
 
+    session.lastActivityAt = Date.now();
     session.busy = true;
     session.step = step;
     session.progress = 0;

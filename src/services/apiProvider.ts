@@ -7,9 +7,13 @@
  *     n'invente jamais d'état local optimiste sur des données matérielles.
  */
 
-import type { FanConfig, FanId, FanProfile, Snapshot } from '../types';
+import type { FanConfig, FanId, FanProfile, HwmonDiscovery, Snapshot } from '../types';
 import { ApiError, api, LiveSocket, type LiveMessage } from './apiClient';
-import { emptySnapshot, type DataService, type DemoActions, type InitialConfig, type LogEventInput } from './types';
+import {
+  emptySnapshot, type CalibrationApi, type CalibrationIdentificationInput,
+  type CalibrationOverview, type DataService, type DemoActions, type FanCommands,
+  type InitialConfig, type LogEventInput,
+} from './types';
 
 /** Cadence de repli quand le WebSocket est indisponible. */
 const FALLBACK_POLL_MS = 5000;
@@ -179,6 +183,62 @@ export class ApiDataProvider implements DataService {
   stopFanTest(id: FanId): void {
     void this.action(() => api.post(`/api/fans/${id}/stop-test`));
   }
+
+  // =====================================================================
+  // Commandes matérielles directes
+  // =====================================================================
+
+  /** Envoie une commande matérielle et **attend la réponse du serveur**.
+   *
+   *  Aucune supposition optimiste : en cas de refus (moteur hors ligne, sortie
+   *  non calibrée, capacité absente) l'`ApiError` remonte à l'appelant, qui
+   *  affiche l'échec. On resynchronise ensuite pour refléter l'état réel, que
+   *  la commande ait abouti ou non. */
+  private async command(fn: () => Promise<unknown>): Promise<void> {
+    try {
+      await fn();
+      this.error = null;
+    } catch (err) {
+      this.error = err instanceof ApiError ? err.message : String(err);
+      await this.refresh();
+      throw err;
+    }
+    await this.refresh();
+  }
+
+  fanCommands: FanCommands = {
+    returnToBios: (id) => this.command(() => api.post(`/api/fans/${id}/return-to-bios`)),
+    takeSoftwareControl: (id) => this.command(() => api.post(`/api/fans/${id}/take-software-control`)),
+    forceMax: (id) => this.command(() => api.post(`/api/fans/${id}/force-max`)),
+    clearForceMax: (id) => this.command(() => api.post(`/api/fans/${id}/clear-force-max`)),
+  };
+
+  // =====================================================================
+  // Assistant de calibration
+  // =====================================================================
+
+  calibration: CalibrationApi = {
+    load: () => api.get<CalibrationOverview>('/api/calibration'),
+    discover: async () => {
+      const discovery = await api.post<HwmonDiscovery>('/api/calibration/discover');
+      return discovery;
+    },
+    start: (fanId, outputKey) =>
+      this.command(() => api.post(`/api/calibration/${fanId}/start`, { outputKey })),
+    identify: (fanId) => this.command(() => api.post(`/api/calibration/${fanId}/identify`)),
+    confirmIdentification: (fanId, input: CalibrationIdentificationInput) =>
+      this.command(() => api.post(`/api/calibration/${fanId}/confirm-identification`, input)),
+    testRpm: (fanId) => this.command(() => api.post(`/api/calibration/${fanId}/test-rpm`)),
+    detectMinimum: (fanId) => this.command(() => api.post(`/api/calibration/${fanId}/detect-minimum`)),
+    testSoftwareControl: (fanId) =>
+      this.command(() => api.post(`/api/calibration/${fanId}/test-software-control`)),
+    testBiosReturn: (fanId) => this.command(() => api.post(`/api/calibration/${fanId}/test-bios-return`)),
+    authorize: (fanId, acceptRestricted = false) =>
+      this.command(() => api.post(`/api/calibration/${fanId}/authorize`, { acceptRestricted })),
+    cancel: (fanId) => this.command(() => api.post(`/api/calibration/${fanId}/cancel`)),
+    emergencyStop: (fanId) => this.command(() => api.post(`/api/calibration/${fanId}/emergency-stop`)),
+    reset: (fanId) => this.command(() => api.post(`/api/calibration/${fanId}/reset`)),
+  };
 
   // =====================================================================
   // Alertes et conflits

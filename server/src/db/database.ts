@@ -202,6 +202,19 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX idx_markers_time ON history_markers(t DESC);
     `,
   },
+  {
+    version: 2,
+    name: 'fan_configs_monitoring_only',
+    // Sortie connue comme non contrôlable en pratique (ex. pwm relié à la
+    // carte mère uniquement par le tachymètre) : supervision RPM seule,
+    // jamais proposée à l'autorisation. Caractéristique matérielle sur
+    // `fan_configs`, pas un état de session — survit à toute réinitialisation
+    // de `calibration`. Défaut 0 : n'active rien automatiquement sur aucune
+    // installation existante.
+    up: `
+      ALTER TABLE fan_configs ADD COLUMN monitoring_only INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1].version;

@@ -390,6 +390,13 @@ export class SimulatedHwmonBackend implements HwmonBackend {
     }
   }
 
+  /** Change le régime maximal simulé — pour reproduire des ventilateurs haute
+   *  vitesse (blowers 40 mm, ex. Tesla V100 : ~15 300 RPM à 100 % en production). */
+  setMaxRpm(label: string, maxRpm: number): void {
+    const f = this.fanByLabel(label);
+    if (f) f.maxRpm = maxRpm;
+  }
+
   /** Retire le retour tachymétrique d'une sortie. */
   setTachAvailable(label: string, available: boolean): void {
     const f = this.fanByLabel(label);

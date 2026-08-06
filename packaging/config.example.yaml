@@ -93,6 +93,90 @@ fan_control:
   # systemd standard (le script d'installation ne modifie jamais votre config).
   embedded: never
 
+# ---------------------------------------------------------------------
+# Mappage « sortie logique ↔ matériel »
+# ---------------------------------------------------------------------
+# Valeurs relevées sur la machine PCIA et vérifiées dans le BIOS MSI.
+# Voir docs/FAN-MAPPING.md pour la méthode et la procédure de vérification.
+#
+# Ce que cette section fait :   désigner quel `pwmN` et quel `fanN_input`
+#                               correspondent à chaque connecteur physique.
+# Ce qu'elle ne fait PAS :      autoriser le contrôle logiciel. Une sortie reste
+#                               pilotée par le BIOS tant que la calibration n'a
+#                               pas vérifié la sortie ET le retour au BIOS.
+#
+# Le contrôleur est désigné par des identifiants stables. N'écrivez JAMAIS un
+# numéro hwmon (hwmon2…) : il est attribué dans l'ordre de sondage des pilotes
+# et change d'un démarrage à l'autre.
+#
+# Pour re-vérifier sur la machine (lecture seule, aucun pwm n'est écrit) :
+#     node /opt/pcia-control-center/dist-server/server/src/cli.js discover
+fans:
+  mapping:
+    # Radiateur CPU — ~2350 RPM.
+    CPU_FAN1:
+      label: CPU_FAN1
+      controller_name: nct6795          # /sys/class/hwmon/hwmonN/name
+      kernel_driver: nct6775            # device/driver
+      controller_address: nct6775.2592  # adresse platform, stable
+      pwm: 2
+      tach: 2
+
+    # Boîtier ARRIÈRE (extraction) — ~820 RPM.
+    # Oui, SYS_FAN1 est l'arrière et SYS_FAN2 l'avant : c'est le câblage réel.
+    SYS_FAN1:
+      label: SYS_FAN1
+      controller_name: nct6795
+      kernel_driver: nct6775
+      controller_address: nct6775.2592
+      pwm: 3
+      tach: 3
+
+    # Boîtier AVANT (admission) — ~790 RPM.
+    # Le canal RPM est fan6_input, pas fan2_input : une déduction par numéro
+    # aurait surveillé le ventilateur du CPU à la place de celui-ci.
+    SYS_FAN2:
+      label: SYS_FAN2
+      controller_name: nct6795
+      kernel_driver: nct6775
+      controller_address: nct6775.2592
+      pwm: 6
+      tach: 6
+
+    # Tesla V100 n°1 — carte PASSIVE, ~9500 RPM.
+    SYS_FAN3:
+      label: SYS_FAN3
+      controller_name: nct6795
+      kernel_driver: nct6775
+      controller_address: nct6775.2592
+      pwm: 4
+      tach: 4
+
+    # Tesla V100 n°2 — carte PASSIVE, ~9300 RPM.
+    SYS_FAN4:
+      label: SYS_FAN4
+      controller_name: nct6795
+      kernel_driver: nct6775
+      controller_address: nct6775.2592
+      pwm: 5
+      tach: 5
+
+  # Connecteurs présents sur la carte mais volontairement non raccordés.
+  # Leur 0 RPM est une MESURE RÉELLE, pas une mesure manquante : rien n'est
+  # branché. Aucune alerte de blocage, aucune calibration, aucune consigne.
+  unconnected:
+    PUMP_FAN1:
+      label: PUMP_FAN1
+      controller_name: nct6795
+      kernel_driver: nct6775
+      controller_address: nct6775.2592
+      pwm: 1
+      tach: 1
+
+# Une entrée qui ne se résout pas est signalée dans les journaux et par la
+# commande `discover`, jamais fatale : la ventilation ne doit pas s'arrêter à
+# cause d'un fichier de configuration.
+
 calibration:
   identify_step_seconds: 6
   identify_low_pwm: 70
@@ -103,6 +187,13 @@ calibration:
   bios_return_observe_seconds: 12
   # Toute calibration est interrompue au-delà de cette température.
   abort_temperature_c: 85
+  # Plafond de RPM plausible pour test-rpm, sorties de refroidissement passif
+  # uniquement (Tesla V100 : ~15 340 RPM mesurés à 100 % sur matériel sain).
+  # Les sorties classiques restent plafonnées à 12 000 RPM (non configurable).
+  passive_rpm_plausible_max: 20000
+  # Une session sans interaction pendant ce délai est restituée au BIOS
+  # automatiquement (filet de sécurité contre les sessions abandonnées).
+  session_idle_timeout_ms: 900000
 
 alerts:
   # Seuils [attention, critique] par composant, en °C.

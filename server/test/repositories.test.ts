@@ -18,11 +18,49 @@ describe('migrations', () => {
     expect(currentSchemaVersion(db)).toBe(0);
 
     const first = migrate(db);
-    expect(first.applied).toEqual([SCHEMA_VERSION]);
+    // Toutes les migrations connues, dans l'ordre — pas seulement la dernière :
+    // une base neuve les traverse toutes depuis la version 0.
+    expect(first.applied).toEqual([1, 2]);
+    expect(first.applied[first.applied.length - 1]).toBe(SCHEMA_VERSION);
     expect(currentSchemaVersion(db)).toBe(SCHEMA_VERSION);
 
     const second = migrate(db);
     expect(second.applied).toEqual([]);
+    db.close();
+  });
+
+  it('migration 2 (monitoring_only) : ajoutée sur une base existante sans perte de données, idempotente', () => {
+    const db = openDatabase({ path: ':memory:', skipMkdir: true });
+    // Reproduit une base restée à la version 1 (schéma d'origine, sans la
+    // colonne), avec une ligne fan_configs déjà présente — comme une
+    // installation antérieure à ce correctif.
+    db.exec(`
+      CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at INTEGER NOT NULL);
+      INSERT INTO schema_migrations VALUES (1, 'initial', 0);
+      CREATE TABLE fan_configs (
+        id TEXT PRIMARY KEY, display_name TEXT NOT NULL, assigned_hardware TEXT NOT NULL,
+        custom_hardware_label TEXT, sensor TEXT NOT NULL, mode TEXT NOT NULL,
+        manual_pwm INTEGER NOT NULL, min_pwm INTEGER NOT NULL, warn_rpm INTEGER NOT NULL,
+        curve TEXT NOT NULL, updated_at INTEGER NOT NULL
+      );
+    `);
+    db.prepare(
+      `INSERT INTO fan_configs (id, display_name, assigned_hardware, sensor, mode, manual_pwm, min_pwm, warn_rpm, curve, updated_at)
+       VALUES ('CPU_FAN1', 'Ventirad CPU', 'cpu', '{}', 'auto', 40, 15, 300, '[]', 1234)`,
+    ).run();
+
+    expect(currentSchemaVersion(db)).toBe(1);
+    const result = migrate(db);
+    expect(result.applied).toEqual([2]);
+    expect(currentSchemaVersion(db)).toBe(SCHEMA_VERSION);
+
+    const row = db.prepare('SELECT * FROM fan_configs WHERE id = ?').get('CPU_FAN1') as Record<string, unknown>;
+    expect(row.monitoring_only).toBe(0); // défaut : n'active rien automatiquement
+    expect(row.display_name).toBe('Ventirad CPU'); // donnée existante intacte
+    expect(row.updated_at).toBe(1234);
+
+    // Idempotente : rejouer migrate() ne change plus rien.
+    expect(migrate(db).applied).toEqual([]);
     db.close();
   });
 

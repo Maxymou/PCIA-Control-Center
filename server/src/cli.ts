@@ -12,11 +12,12 @@ import { createLogger, setLogFormat, setLogLevel } from './logger.js';
 import { openAndMigrate } from './db/database.js';
 import { createRepositories, seedDefaults } from './db/repositories.js';
 import { FanIpcClient, readStateFile } from './fan/ipc.js';
-import { canWriteDir, createRuntimeEnv } from './runtime.js';
+import { canWriteDirReadOnly, createRuntimeEnv } from './runtime.js';
 import { readSystemInfo } from './system/info.js';
 import { hasTool, KNOWN_TOOLS } from './system/exec.js';
 import { FAN_IDS } from './contract.js';
 import { defaultFanConfigs, DEFAULT_PROFILE_ID } from './fan/defaults.js';
+import { collectTachs, resolveFanMapping } from './hwmon/mapping.js';
 
 const log = createLogger('cli');
 
@@ -82,10 +83,27 @@ async function main(): Promise<void> {
   }
 
   const loaded = loadConfig(args.configPath);
-  const resolved = resolveWritablePaths(loaded.config, canWriteDir);
+  // Sonde en lecture seule : une commande de diagnostic ne crée aucun répertoire.
+  const resolved = resolveWritablePaths(loaded.config, canWriteDirReadOnly);
   const config = resolved.config;
   setLogLevel(args.json ? 'error' : config.logging.level);
   setLogFormat('text');
+
+  // Un repli sur les chemins utilisateur signifie que la CLI **ne regarde pas**
+  // les fichiers du service : elle lirait une base et un état vides, et
+  // annoncerait un moteur hors ligne alors qu'il tourne. Le dire franchement.
+  const fellBack = resolved.warnings.length > 0;
+  if (!args.json) {
+    for (const w of [...loaded.warnings, ...resolved.warnings]) {
+      process.stderr.write(`Avertissement : ${w}\n`);
+    }
+    if (fellBack) {
+      process.stderr.write(
+        'Avertissement : les chemins du service ne sont pas accessibles depuis ce compte.\n'
+        + '                Relancer avec sudo pour interroger l’installation réelle.\n\n',
+      );
+    }
+  }
 
   const client = new FanIpcClient(fanSocketPath(config));
 
@@ -109,6 +127,8 @@ async function main(): Promise<void> {
         distribution: info.distribution,
         fanEngine: {
           online,
+          /** `true` : impossible de conclure, les chemins du service sont illisibles. */
+          undetermined: !online && fellBack,
           pid: state?.pid ?? null,
           lastHeartbeat: state ? new Date(state.heartbeat).toISOString() : null,
           failsafe: state?.failsafe ?? false,
@@ -121,7 +141,13 @@ async function main(): Promise<void> {
         `Interface        : ${data.server}`,
         `Base             : ${data.database}`,
         `Machine          : ${data.host} · ${data.distribution} · noyau ${data.kernel}`,
-        `Moteur ventilation : ${online ? `en ligne (pid ${data.fanEngine.pid})` : 'HORS LIGNE'}`,
+        // « HORS LIGNE » n'est une information que si l'on a réellement pu lire
+        // le fichier d'état du service. Sinon c'est un défaut de droits.
+        `Moteur ventilation : ${online
+          ? `en ligne (pid ${data.fanEngine.pid})`
+          : fellBack
+            ? 'INDÉTERMINÉ (état du service illisible depuis ce compte — relancer avec sudo)'
+            : 'HORS LIGNE'}`,
         ...(state?.outputs ?? []).map(
           (o) => `  ${o.id.padEnd(9)} ${o.controlState.padEnd(20)} ${String(o.pwm).padStart(3)} %  ${o.rpm ?? '—'} RPM`,
         ),
@@ -150,6 +176,40 @@ async function main(): Promise<void> {
         '',
         'Capteurs de température :',
         ...discovery.tempSensors.map((s) => `  ${(s.label ?? `temp${s.index}`).padEnd(18)} ${s.valueC ?? '—'} °C   ${s.key}`),
+        '',
+        // Les canaux RPM non corrélés à une sortie PWM sont précisément ceux
+        // qu'il faut attribuer à la main dans `fans.mapping` : sans eux, une
+        // sortie peut être pilotée sans jamais qu'on sache si elle tourne.
+        'Canaux RPM sans sortie PWM corrélée :',
+        ...(discovery.orphanTachs.length
+          ? discovery.orphanTachs.map((t) => `  ${t.key.padEnd(28)} rpm=${t.rpm ?? '—'}\n    ${t.path}`)
+          : ['  (aucun)']),
+        '',
+        'Mappage déclaré dans la configuration :',
+        ...(Object.keys(config.fans.mapping).length
+          ? [...resolveFanMapping(
+            config.fans.mapping,
+            discovery,
+            collectTachs(discovery, (key) => env.hwmon.tachKeysForController(key)),
+          ).values()].map(
+            (m) => `  ${m.fanId.padEnd(9)} ${m.outputKey ?? 'NON RÉSOLU'}`
+              + `${m.tachKey === undefined ? '' : `  rpm=${m.tachKey ?? 'aucun'}`}`
+              + (m.warnings.length ? `\n${m.warnings.map((w) => `    ! ${w}`).join('\n')}` : ''),
+          )
+          : ['  (aucun — les liaisons viennent uniquement de la calibration)']),
+        '',
+        'Connecteurs déclarés non raccordés :',
+        ...(Object.keys(config.fans.unconnected).length
+          ? [...resolveFanMapping<string>(
+            config.fans.unconnected,
+            discovery,
+            collectTachs(discovery, (key) => env.hwmon.tachKeysForController(key)),
+          ).values()].map(
+            (m) => `  ${m.fanId.padEnd(12)} ${m.outputKey ?? 'NON RÉSOLU'}`
+              + `${m.tachKey === undefined ? '' : `  rpm=${m.tachKey ?? 'aucun'}`}`
+              + (m.warnings.length ? `\n${m.warnings.map((w) => `    ! ${w}`).join('\n')}` : ''),
+          )
+          : ['  (aucun)']),
         ...(discovery.warnings.length ? ['', 'Avertissements :', ...discovery.warnings.map((w) => `  ! ${w}`)] : []),
       ].join('\n'));
       break;

@@ -138,12 +138,27 @@ export interface FanConfig {
   minPwm: number;           // seuil minimum de fonctionnement
   warnRpm: number;          // seuils d'alerte
   curve: FanCurve;          // courbe active (mode auto)
+  /** Sortie connue comme non contrôlable en pratique (ex. pwm relié à la
+   *  carte mère uniquement par le tachymètre) : supervision RPM seule, jamais
+   *  proposée à l'autorisation. Ne se réinitialise jamais avec la calibration
+   *  — c'est une caractéristique matérielle, pas un état de session. */
+  monitoringOnly: boolean;
 }
+
+/** D'où vient la vitesse affichée.
+ *
+ *  Cette distinction est une exigence de sécurité, pas un confort d'affichage :
+ *  un « 0 RPM » inventé parce que la mesure manque ressemble à un ventilateur
+ *  arrêté, et un chiffre simulé ressemble à une mesure. Les trois cas doivent
+ *  rester discernables jusque dans l'interface. */
+export type RpmSource = 'measured' | 'simulated' | 'unavailable';
 
 export interface FanLive {
   id: FanId;
   pwm: number;              // consigne appliquée
-  rpm: number;
+  /** `null` = aucune mesure exploitable. Jamais remplacé par 0. */
+  rpm: number | null;
+  rpmSource: RpmSource;
   refTemp: number;
   status: Severity;
   testRemaining?: number;   // secondes restantes en mode test
@@ -258,6 +273,8 @@ export interface FanOutputState {
   pwm: number;
   requestedPwm: number;
   rpm: number | null;
+  /** Provenance de `rpm` — mesure réelle, simulation, ou rien. */
+  rpmSource: RpmSource;
   refTemp: number | null;
   sensorLostSince: number | null;
   stalled: boolean;
@@ -265,8 +282,188 @@ export interface FanOutputState {
   testRemainingS: number | null;
   lastWriteError: string | null;
   writeFailures: number;
+  /** Sortie PWM réellement pilotée (contrôle logiciel). */
   boundOutputKey: string | null;
+  /** Sortie PWM observée — identique à `boundOutputKey` sous contrôle logiciel,
+   *  renseignée aussi sous contrôle BIOS quand le mappage la désigne. */
+  monitorOutputKey: string | null;
+  /** Origine de la liaison : configuration déclarative ou calibration. */
+  mappingSource: 'config' | 'calibration' | 'none';
+  /** Nom du connecteur physique (CPU_FAN1, SYS_FAN3…). */
+  connectorLabel: string | null;
+  /** Chemin sysfs courant de la sortie — informatif, jamais une identité. */
+  hwmonPath: string | null;
   severity: Severity;
+}
+
+/** Connecteur présent sur la carte mais déclaré non raccordé.
+ *
+ *  Il n'est ni piloté, ni calibrable, ni surveillé : il est seulement *connu*,
+ *  pour que l'inventaire soit complet et qu'un `0 RPM` légitime ne soit pas pris
+ *  pour un ventilateur bloqué. */
+export interface UnconnectedOutputState {
+  /** Nom du connecteur (PUMP_FAN1, AIO_PUMP…). */
+  label: string;
+  /** Sortie PWM correspondante, ou `null` si la déclaration ne résout pas. */
+  outputKey: string | null;
+  /** Vitesse relevée. `0` est une mesure réelle : rien n'est branché. */
+  rpm: number | null;
+  rpmSource: RpmSource;
+  hwmonPath: string | null;
+}
+
+// ---------- Découverte matérielle et calibration ----------
+/** Ces types décrivent ce que le moteur de ventilation observe réellement dans
+ *  `/sys`. Ils sont définis ici — et non côté serveur — pour que le front-end et
+ *  le back-end partagent **une seule source de vérité** : `server/src/contract.ts`
+ *  les ré-exporte tels quels, comme il le fait déjà pour `FanOutputState`. */
+
+export type RpmValidationResult =
+  | 'CONFIRMED' | 'PROBABLE' | 'NOT_AVAILABLE' | 'INCONSISTENT' | 'FAILED';
+
+export type BiosReturnResult =
+  | 'CONFIRMED' | 'PROBABLE' | 'NOT_CONFIRMED' | 'IMPOSSIBLE' | 'UNKNOWN';
+
+/** Identification stable d'un contrôleur hwmon, indépendante de l'index /sys. */
+export interface ControllerIdentity {
+  /** Empreinte stable calculée à partir des éléments ci-dessous. */
+  key: string;
+  /** Contenu de `name` (ex. nct6798, coretemp, nvme). */
+  driverName: string;
+  /** Pilote noyau réel (device/driver). */
+  kernelDriver: string | null;
+  /** Bus (pci, platform, i2c, acpi…). */
+  bus: string | null;
+  /** Adresse sur le bus (ex. 0000:00:1f.3, nct6775.2592). */
+  address: string | null;
+  /** MODALIAS relevé dans uevent. */
+  modalias: string | null;
+  /** Chemin /sys courant — informatif uniquement, jamais un identifiant. */
+  currentPath: string;
+}
+
+/** Une sortie PWM telle que découverte sur le système. */
+export interface DiscoveredPwmOutput {
+  /** Identifiant stable : `${controller.key}#pwm${index}`. */
+  key: string;
+  controller: ControllerIdentity;
+  /** Index sysfs (pwm1 -> 1). Peut changer : jamais utilisé seul comme identité. */
+  index: number;
+  pwmPath: string;
+  enablePath: string | null;
+  /** Modes acceptés par pwmN_enable, quand ils sont énumérables. */
+  supportedEnableModes: number[];
+  /** Mode courant lu dans pwmN_enable (null si non exposé). */
+  currentEnableMode: number | null;
+  currentPwm: number | null;
+  /** Entrée tachymétrique associée, si une corrélation a pu être établie. */
+  tachPath: string | null;
+  tachIndex: number | null;
+  currentRpm: number | null;
+  label: string | null;
+  writable: boolean;
+}
+
+/** Capteur de température découvert. */
+export interface DiscoveredTempSensor {
+  key: string;
+  controller: ControllerIdentity;
+  index: number;
+  path: string;
+  label: string | null;
+  valueC: number | null;
+  /** Identifiant matériel du front-end auquel ce capteur a été rattaché. */
+  mappedTo: HardwareId | null;
+}
+
+export interface HwmonDiscovery {
+  controllers: ControllerIdentity[];
+  pwmOutputs: DiscoveredPwmOutput[];
+  tempSensors: DiscoveredTempSensor[];
+  /** Entrées tachymétriques sans sortie PWM corrélée. */
+  orphanTachs: { key: string; controller: ControllerIdentity; index: number; path: string; rpm: number | null }[];
+  warnings: string[];
+}
+
+/** Enregistrement de calibration persisté pour une sortie logique. */
+export interface CalibrationRecord {
+  fanId: FanId;
+  state: CalibrationState;
+  /** Identité stable de la sortie PWM retenue. */
+  outputKey: string | null;
+  controllerKey: string | null;
+  controllerDriver: string | null;
+  controllerAddress: string | null;
+  /** Index PWM/tach au moment de la calibration (informatif). */
+  pwmIndex: number | null;
+  tachIndex: number | null;
+  /** Chemins observés lors de la calibration — informatifs, revalidés au démarrage. */
+  lastPwmPath: string | null;
+  lastTachPath: string | null;
+  assignedHardware: HardwareId | 'none' | 'custom' | null;
+  customHardwareLabel: string | null;
+  rpmValidation: RpmValidationResult | null;
+  /** Seuil de démarrage observé (PWM en %). */
+  startupPwm: number | null;
+  /** Minimum retenu après marge de sécurité (PWM en %). */
+  minimumPwm: number | null;
+  minRpmObserved: number | null;
+  maxRpmObserved: number | null;
+  softwareControlValidated: boolean;
+  biosReturn: BiosReturnResult | null;
+  /** Mode pwmN_enable observé comme « BIOS/automatique » pour cette sortie. */
+  biosEnableMode: number | null;
+  /** Mode pwmN_enable permettant le pilotage manuel. */
+  manualEnableMode: number | null;
+  biosVersion: string | null;
+  kernelVersion: string | null;
+  calibratedAt: number | null;
+  notes: string | null;
+  /** Invalidé si le matériel a changé depuis la calibration. */
+  invalidatedReason: string | null;
+}
+
+/** Étapes de l'assistant de calibration, telles que le moteur les nomme. */
+export type CalibrationStep =
+  | 'idle' | 'identify' | 'test-rpm' | 'detect-minimum'
+  | 'test-software-control' | 'test-bios-return';
+
+/** Observation d'un tachymètre pendant l'identification physique. */
+export interface TachObservation {
+  tachKey: string;
+  tachIndex: number;
+  /** RPM au palier bas puis au palier haut. */
+  rpmLow: number | null;
+  rpmHigh: number | null;
+  /** Écart relatif — sert à identifier le tachymètre réellement lié. */
+  delta: number;
+}
+
+/** Session de calibration en cours, diffusée par le moteur.
+ *  La conformité avec la structure réellement produite par
+ *  `server/src/fan/calibration.ts` est vérifiée à la compilation dans
+ *  `server/src/contract.ts` : toute divergence casse le build. */
+export interface CalibrationSession {
+  fanId: FanId;
+  outputKey: string;
+  step: CalibrationStep;
+  busy: boolean;
+  startedAt: number;
+  /** Progression 0–1 de l'étape en cours. */
+  progress: number;
+  message: string;
+  /** État sauvegardé avant toute écriture — cible de la restauration. */
+  initial: {
+    enableMode: number | null;
+    pwmPercent: number | null;
+    rpm: number | null;
+    refTemp: number | null;
+    savedAt: number;
+  };
+  lastObservations: TachObservation[];
+  lastError: string | null;
+  /** Résultat de la dernière étape, à afficher dans l'assistant. */
+  lastResult: Record<string, unknown> | null;
 }
 
 // ---------- Snapshot global ----------
@@ -288,4 +485,8 @@ export interface Snapshot {
   system?: BackendSystemStatus;
   /** État BIOS/logiciel des sorties — absent en simulation locale. */
   fanOutputs?: FanOutputState[];
+  /** Connecteurs déclarés non raccordés — absents en simulation locale. */
+  unconnectedOutputs?: UnconnectedOutputState[];
+  /** Enregistrements de calibration — absents en simulation locale. */
+  calibration?: CalibrationRecord[];
 }

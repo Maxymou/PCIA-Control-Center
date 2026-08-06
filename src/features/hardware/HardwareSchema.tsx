@@ -2,6 +2,7 @@ import { useLiveStore } from '../../store/useLiveStore';
 import { useConfigStore } from '../../store/useConfigStore';
 import { useUiStore } from '../../store/useUiStore';
 import type { FanId, HardwareId, Severity } from '../../types';
+import { fmtRpm, fmtRpmShort, rpmAriaLabel } from '../../utils/format';
 
 const SEV_COLOR: Record<Severity, string> = {
   normal: 'var(--ok)', warning: 'var(--warn)', critical: 'var(--crit)', unknown: 'var(--off)',
@@ -24,8 +25,22 @@ export function HardwareSchema() {
     if (!item?.installed) return null;
     const sel = ui.selectedHardwareId === id;
     return (
-      <g className="slot" onClick={() => ui.selectHardware(sel ? null : id)} role="button" tabIndex={0}
-        aria-label={item.name}>
+      <g
+        className="slot"
+        role="button"
+        tabIndex={0}
+        aria-pressed={sel}
+        aria-label={`${item.name}${item.metrics.temp !== undefined ? `, ${item.metrics.temp.toFixed(0)} degrés` : ''}`}
+        onClick={() => ui.selectHardware(sel ? null : id)}
+        // Un élément portant role="button" doit répondre à Entrée et à Espace,
+        // sans quoi il est inutilisable au clavier malgré son tabIndex.
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            ui.selectHardware(sel ? null : id);
+          }
+        }}
+      >
         <rect x={x} y={y} width={w} height={h} rx="7"
           fill="var(--card)" stroke={sel ? 'var(--accent)' : 'var(--border-strong)'} strokeWidth={sel ? 2 : 1.2} />
         <circle cx={x + 12} cy={y + h / 2} r="4" fill={SEV_COLOR[item.metrics.status]} />
@@ -43,13 +58,26 @@ export function HardwareSchema() {
     const lv = live(id);
     const sel = ui.selectedFanId === id;
     return (
-      <g className="slot" onClick={() => ui.selectFan(id)} role="button" tabIndex={0} aria-label={cfg.displayName}>
+      <g
+        className="slot"
+        role="button"
+        tabIndex={0}
+        aria-pressed={sel}
+        aria-label={`${cfg.displayName}, ${rpmAriaLabel(lv?.rpm, lv?.rpmSource)}`}
+        onClick={() => ui.selectFan(id)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            ui.selectFan(id);
+          }
+        }}
+      >
         <rect x={x} y={y} width={104} height={30} rx="6"
           fill={sel ? 'var(--accent-bg)' : 'var(--bg-raised)'}
           stroke={sel ? 'var(--accent)' : 'var(--border)'} strokeWidth={sel ? 1.8 : 1} />
         <circle cx={x + 11} cy={y + 15} r="3.5" fill={SEV_COLOR[lv?.status ?? 'unknown']} />
         <text x={x + 20} y={y + 13} fontSize="9.5" fill="var(--text)" className="mono" fontWeight="600">{id}</text>
-        <text x={x + 20} y={y + 24} fontSize="9" fill="var(--text-2)" className="mono">{lv ? `${lv.rpm} RPM` : '—'}</text>
+        <text x={x + 20} y={y + 24} fontSize="9" fill="var(--text-2)" className="mono">{fmtRpmShort(lv?.rpm, lv?.rpmSource)}</text>
       </g>
     );
   };
@@ -66,7 +94,11 @@ export function HardwareSchema() {
   return (
     <div className="hw-schema card card-pad">
       <p className="card-title">Schéma matériel</p>
-      <svg viewBox="0 0 520 375" role="img" aria-label="Schéma des associations matériel et ventilation">
+      {/* `role="group"` et non `role="img"` : ce schéma contient des zones
+          focalisables, et une image ne peut pas avoir de descendants
+          interactifs. La description textuelle dépliable, juste dessous, tient
+          lieu d'alternative au dessin. */}
+      <svg viewBox="0 0 520 375" role="group" aria-label="Schéma des associations matériel et ventilation">
         {/* Contour boîtier */}
         <rect x="6" y="8" width="508" height="360" rx="12" fill="none" stroke="var(--border)" strokeWidth="1.2" strokeDasharray="5 4" />
         <text x="18" y="28" fontSize="10" fill="var(--text-3)" letterSpacing="1.5">BOÎTIER</text>
@@ -114,9 +146,32 @@ export function HardwareSchema() {
         <HwBox id="case-front" x={190} y={322} w={140} h={38} label="Boîtier avant" />
         <HwBox id="case-rear" x={355} y={322} w={136} h={38} label="Boîtier arrière" />
       </svg>
-      <p className="small muted" style={{ margin: '8px 0 0' }}>
-        Cliquez sur une sortie ou un composant pour afficher ses détails et réglages.
+      <p className="small muted" style={{ margin: 'var(--sp-2) 0 0' }}>
+        Sélectionnez une sortie ou un composant pour l’afficher en surbrillance
+        dans l’inventaire et dans la section Ventilation.
       </p>
+
+      {/* Alternative textuelle : le schéma est une image, son contenu doit être
+          accessible autrement qu'en le regardant. */}
+      <details className="small" style={{ marginTop: 'var(--sp-2)' }}>
+        <summary>Description textuelle des attributions</summary>
+        <ul style={{ margin: 'var(--sp-2) 0 0', paddingLeft: '1.1rem' }}>
+          {fanConfigs.map((f) => {
+            const lv = live(f.id);
+            const target = f.assignedHardware === 'custom'
+              ? (f.customHardwareLabel ?? 'matériel personnalisé')
+              : f.assignedHardware === 'none'
+                ? 'aucun matériel'
+                : (hw(f.assignedHardware)?.name ?? f.assignedHardware);
+            return (
+              <li key={f.id}>
+                <b className="mono">{f.id}</b> ({f.displayName}) → {target}
+                {lv ? ` — ${lv.pwm} %, ${fmtRpm(lv.rpm, lv.rpmSource)}` : ' — état indisponible'}
+              </li>
+            );
+          })}
+        </ul>
+      </details>
     </div>
   );
 }

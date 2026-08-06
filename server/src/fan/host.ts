@@ -261,8 +261,7 @@ export class FanHost {
       case 'calibration.emergencyStop':
         return this.calibration.emergencyStop(this.fanIdParam(params));
       case 'calibration.reset':
-        this.calibration.reset(this.fanIdParam(params));
-        return { ok: true };
+        return this.calibration.reset(this.fanIdParam(params));
 
       default:
         throw new Error(`Commande non implémentée : ${command}`);

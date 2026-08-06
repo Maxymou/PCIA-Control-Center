@@ -45,7 +45,15 @@ export function EventsList() {
             onChange={(e) => setSearch(e.target.value)} aria-label="Filtrer les événements" />
         </div>
       </div>
-      <div style={{ marginTop: 8, maxHeight: 260, overflowY: 'auto' }}>
+      {/* Une zone défilante doit pouvoir être parcourue au clavier : sans
+          `tabIndex`, son contenu est inatteignable sans souris ni geste tactile. */}
+      <div
+        className="scroll-y"
+        style={{ marginTop: 'var(--sp-2)', maxHeight: 260 }}
+        tabIndex={0}
+        role="region"
+        aria-label="Liste des événements récents"
+      >
         {shown.length === 0 && <div className="empty-state">Aucun événement sur la période choisie.</div>}
         {shown.map((e) => (
           <div key={e.id} className="event-row">
