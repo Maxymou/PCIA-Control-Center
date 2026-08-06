@@ -189,10 +189,14 @@ export async function registerCalibrationRoutes(app: FastifyInstance, ctx: ApiCo
     const id = fanId(request);
     if (!id.success) return errorResponse(reply, 404, 'NOT_FOUND', 'Sortie inconnue.');
     try {
-      await ctx.fans.send('calibration.reset', { fanId: id.data });
+      const result = await ctx.fans.send<{ ok: boolean; error?: string }>('calibration.reset', { fanId: id.data });
+      if (!result.ok) {
+        // Ne jamais annoncer un retour BIOS qui n'a pas été vérifié.
+        return errorResponse(reply, 409, 'RESET_REFUSED', result.error ?? 'Réinitialisation refusée.');
+      }
       ctx.repos.events.append({
         category: 'fan', level: 'warning', targetLabel: id.data,
-        message: 'Calibration réinitialisée — retour au contrôle BIOS',
+        message: 'Calibration réinitialisée — retour au contrôle BIOS confirmé',
       });
       ctx.publish('calibration.updated');
       return { ok: true };

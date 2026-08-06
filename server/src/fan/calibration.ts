@@ -326,24 +326,42 @@ export class CalibrationController {
    *  `unhandledRejection`. La lecture en base est incluse dans le `try` : après
    *  `shutdown()` la connexion SQLite peut être fermée, et la restitution
    *  matérielle doit malgré tout être tentée. */
-  private async restoreInitial(session: CalibrationSession, cause: string): Promise<void> {
+  /** Restaure l'état initial d'une session. Retourne `true` seulement si le
+   *  mode d'activation cible a été **vérifié par relecture** (ou s'il n'y
+   *  avait aucun mode à restaurer) — jamais une simple absence d'exception.
+   *  `reset()` s'appuie sur ce retour pour décider de conserver ou non la
+   *  session en cas d'échec (voir §16.9). */
+  private async restoreInitial(session: CalibrationSession, cause: string): Promise<boolean> {
     const hwmon = this.deps.engine.hwmonBackend();
+    let targetMode = session.initial.enableMode;
     try {
       if (session.initial.pwmPercent !== null) {
         hwmon.writePwmPercent(session.outputKey, session.initial.pwmPercent);
       }
-      if (session.initial.enableMode !== null) {
-        hwmon.writeEnableMode(session.outputKey, session.initial.enableMode);
+      if (targetMode !== null) {
+        hwmon.writeEnableMode(session.outputKey, targetMode);
       } else if (!this.closed) {
         const record = this.deps.repos.calibration.get(session.fanId);
         if (record.biosReturn === 'CONFIRMED' && record.biosEnableMode !== null) {
           // Mode initial inconnu : retour BIOS si celui-ci a été validé.
-          hwmon.writeEnableMode(session.outputKey, record.biosEnableMode);
+          targetMode = record.biosEnableMode;
+          hwmon.writeEnableMode(session.outputKey, targetMode);
+        }
+      }
+      if (targetMode !== null) {
+        const after = hwmon.readEnableMode(session.outputKey);
+        if (after !== targetMode) {
+          log.error('Restauration de l’état initial non vérifiée', {
+            fanId: session.fanId, cause, expected: targetMode, actual: after,
+          });
+          return false;
         }
       }
       log.info('État initial restauré', { fanId: session.fanId, cause });
+      return true;
     } catch (err) {
       log.error('Restauration de l’état initial impossible', { fanId: session.fanId, cause, error: err });
+      return false;
     }
   }
 
@@ -896,13 +914,43 @@ export class CalibrationController {
     return { ok: true, record: authorized };
   }
 
-  /** Réinitialise complètement la calibration d'une sortie. */
-  reset(fanId: FanId): void {
+  /** Réinitialise complètement la calibration d'une sortie.
+   *
+   *  §16.9 — si une session est encore ouverte, sa restitution BIOS doit être
+   *  **vérifiée avant** toute suppression : sans cela, une sortie laissée en
+   *  mode manuel par une étape en cours (identification, test RPM…) devient
+   *  orpheline dès que `output_key`/`assigned_hardware` sont effacés — plus
+   *  aucun mécanisme (y compris la réconciliation) ne peut alors la
+   *  retrouver. Même niveau d'exigence que `cancel()`. */
+  async reset(fanId: FanId): Promise<{ ok: boolean; error?: string }> {
+    const session = this.sessions.get(fanId);
+    if (session) {
+      if (session.busy) {
+        return { ok: false, error: 'Étape en cours : impossible de réinitialiser maintenant.' };
+      }
+      const enableModeBefore = safe(() => this.deps.engine.hwmonBackend().readEnableMode(session.outputKey));
+      log.info('Réinitialisation demandée', { fanId, outputKey: session.outputKey, enableModeBefore });
+
+      const restored = await this.restoreInitial(session, 'réinitialisation');
+      if (!restored) {
+        log.error('Réinitialisation refusée : restitution BIOS non confirmée, session conservée', {
+          fanId, outputKey: session.outputKey,
+        });
+        return {
+          ok: false,
+          error: 'Restitution au BIOS non confirmée : la sortie reste sous contrôle logiciel. '
+            + 'La calibration n’a pas été réinitialisée — réessayez, ou utilisez l’arrêt d’urgence.',
+        };
+      }
+      this.sessions.delete(fanId);
+      this.aborts.delete(fanId);
+    }
+
     this.deps.repos.calibration.reset(fanId);
-    this.sessions.delete(fanId);
     this.deps.engine.reloadCalibration(fanId);
     this.deps.engine.resume(fanId);
     this.notify(fanId);
+    return { ok: true };
   }
 
   // =====================================================================

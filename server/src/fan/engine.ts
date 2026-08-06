@@ -482,17 +482,39 @@ export class FanEngine {
    *  au démarrage (`evaluateControlTakeover` initial) et à chaque tick pour
    *  toute sortie non suspendue et non sous contrôle logiciel. */
   private reconcileOrphanedManualMode(runtime: OutputRuntime, cal: CalibrationRecord): void {
-    if (!cal.outputKey) return;
-    const output = this.deps.hwmon.getOutput(cal.outputKey);
+    // Défense en profondeur : les appelants excluent déjà les sessions actives
+    // et les sorties légitimement sous contrôle logiciel, mais cette fonction
+    // ne doit jamais en dépendre uniquement pour rester un filet de sécurité
+    // fiable même si un appelant futur oublie ce garde-fou.
+    if (runtime.suspendedForCalibration || runtime.controlState === 'SOFTWARE_CONTROLLED') return;
+
+    // Après un reset() en cours de session (ou toute perte de l'enregistrement
+    // de calibration), cal.outputKey est nul : on retombe sur le mappage
+    // déclaratif stable de config.yaml, déjà résolu et vérifié contre le
+    // contrôleur et l'index PWM réels par applyDeclaredMapping().
+    const declared = this.mapping.get(runtime.id);
+    const outputKey = cal.outputKey ?? declared?.outputKey ?? null;
+    if (!outputKey) return;
+    const output = this.deps.hwmon.getOutput(outputKey);
     if (!output?.enablePath) return;
-    const current = this.deps.hwmon.readEnableMode(cal.outputKey);
-    const expectedBios = cal.biosEnableMode ?? output.currentEnableMode;
+
     const manualMode = cal.manualEnableMode ?? MANUAL_ENABLE_MODE;
-    if (current === null || expectedBios === null || current !== manualMode || current === expectedBios) return;
+    const current = this.deps.hwmon.readEnableMode(outputKey);
+    if (current === null || current !== manualMode) return;
+
+    // Mode BIOS attendu : celui mémorisé par la calibration si disponible,
+    // sinon le mode majoritaire observé sur les autres sorties du même
+    // contrôleur. Jamais `output.currentEnableMode` seul : capturé à la
+    // dernière découverte, il peut déjà refléter la sortie corrompue elle-même
+    // si la découverte a eu lieu après coup (exactement le cas qui nous occupe).
+    const expectedBios = cal.biosEnableMode
+      ?? this.inferBiosModeFromSiblings(output.controller.key, outputKey, manualMode);
+    if (expectedBios === null || expectedBios === current) return;
+
     try {
-      this.deps.hwmon.writeEnableMode(cal.outputKey, expectedBios);
+      this.deps.hwmon.writeEnableMode(outputKey, expectedBios);
       log.warn('Sortie manuelle orpheline réconciliée — restitution BIOS forcée', {
-        fanId: runtime.id, outputKey: cal.outputKey, from: current, to: expectedBios,
+        fanId: runtime.id, outputKey, from: current, to: expectedBios,
       });
       this.emitEvent({
         category: 'fan', level: 'warning', targetLabel: runtime.config.displayName,
@@ -501,6 +523,25 @@ export class FanEngine {
     } catch (err) {
       log.error('Réconciliation impossible : écriture du mode BIOS refusée', { fanId: runtime.id, error: err });
     }
+  }
+
+  /** Mode d'activation majoritaire parmi les autres sorties du même
+   *  contrôleur (à l'exclusion du mode manuel) — référence quand aucun mode
+   *  BIOS connu n'est mémorisé pour la sortie orpheline elle-même. */
+  private inferBiosModeFromSiblings(controllerKey: string, excludeOutputKey: string, manualMode: number): number | null {
+    const counts = new Map<number, number>();
+    for (const o of this.deps.hwmon.cached().pwmOutputs) {
+      if (o.controller.key !== controllerKey || o.key === excludeOutputKey) continue;
+      const mode = this.deps.hwmon.readEnableMode(o.key);
+      if (mode === null || mode === manualMode) continue;
+      counts.set(mode, (counts.get(mode) ?? 0) + 1);
+    }
+    let best: number | null = null;
+    let bestCount = 0;
+    for (const [mode, count] of counts) {
+      if (count > bestCount) { best = mode; bestCount = count; }
+    }
+    return best;
   }
 
   private invalidate(runtime: OutputRuntime, reason: string): void {

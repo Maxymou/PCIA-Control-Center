@@ -495,7 +495,7 @@ describe('fan_configs.monitoring_only', () => {
     expect(host.state().outputs.find((o) => o.id === 'CPU_FAN1')!.controlState).toBe('BIOS_CONTROLLED');
   });
 
-  it('une réinitialisation de calibration ne supprime jamais monitoring_only (porté par fan_configs, pas calibration)', () => {
+  it('une réinitialisation de calibration ne supprime jamais monitoring_only (porté par fan_configs, pas calibration)', async () => {
     const env = makeEnv();
     const host = makeHost(env);
     host.start();
@@ -503,7 +503,9 @@ describe('fan_configs.monitoring_only', () => {
     env.repos.fanConfigs.upsert({ ...env.repos.fanConfigs.get('CPU_FAN1')!, monitoringOnly: true });
     const key = env.hwmon.outputKeyByLabel('CPU_FAN1')!;
     host.calibration.start('CPU_FAN1', key);
-    host.calibration.reset('CPU_FAN1');
+    // Une session est ouverte : reset() attend désormais une restitution BIOS
+    // vérifiée avant de supprimer quoi que ce soit (voir §16.9).
+    expect((await host.calibration.reset('CPU_FAN1')).ok).toBe(true);
 
     expect(env.repos.calibration.get('CPU_FAN1').state).toBe('NOT_CALIBRATED');
     expect(env.repos.fanConfigs.get('CPU_FAN1')!.monitoringOnly).toBe(true);
@@ -527,5 +529,161 @@ describe('fan_configs.monitoring_only', () => {
     for (const cfg of env.repos.fanConfigs.list()) {
       expect(cfg.monitoringOnly).toBe(false);
     }
+  });
+});
+
+// =====================================================================
+// reset() : restitution BIOS vérifiée avant suppression de la session
+// =====================================================================
+//
+// Reproduit exactement l'incident du 2026-08-05/06 : une session ouverte sur
+// SYS_FAN3/pwm4 (mappage correct, enableMode initial 5) passe en mode manuel
+// pendant l'identification, puis l'utilisateur clique « Réinitialiser » avant
+// la fin normale du parcours. L'ancien reset() effaçait l'enregistrement et
+// la session sans jamais restaurer le BIOS, laissant pwm4_enable bloqué à 1,
+// invisible ensuite à toute réconciliation puisque plus aucun outputKey ne
+// pointait vers lui.
+
+describe('reset() : restitution BIOS vérifiée avant suppression', () => {
+  it('restitue pwm_enable a 5 (verifie) avant de supprimer la session — scenario reproduit', async () => {
+    const env = makeEnv();
+    const host = makeHost(env, (c) => { c.calibration.identifyStepSeconds = 1; });
+    host.start();
+    const key = env.hwmon.outputKeyByLabel('SYS_FAN3')!;
+
+    // 1. Démarrage sur pwm4, enableMode initial 5 (BIOS) — mappage correct.
+    expect(host.calibration.start('SYS_FAN3', key).ok).toBe(true);
+    expect(env.hwmon.readEnableMode(key)).toBe(SIM_MODE_BIOS);
+    env.repos.calibration.save({ ...env.repos.calibration.get('SYS_FAN3'), assignedHardware: 'v100-1' });
+
+    // 2. Passage temporaire en mode manuel (identification physique en cours).
+    expect(host.calibration.identify('SYS_FAN3').ok).toBe(true);
+    await waitFor(() => env.hwmon.readEnableMode(key) === SIM_MODE_MANUAL, 5000, 'passage en mode manuel');
+    // L'étape se termine (comme dans l'incident : l'utilisateur attend avant de cliquer).
+    await waitFor(() => host.calibration.session('SYS_FAN3')?.busy === false, 10_000, 'fin de l’étape');
+    expect(env.hwmon.readEnableMode(key)).toBe(SIM_MODE_MANUAL);
+
+    // 3. Clic sur « Réinitialiser la calibration ».
+    const result = await host.calibration.reset('SYS_FAN3');
+
+    // 4. pwm_enable revenu à 5, vérifié par relecture, avant toute suppression.
+    expect(result.ok).toBe(true);
+    expect(env.hwmon.readEnableMode(key)).toBe(SIM_MODE_BIOS);
+
+    // 5. La session est supprimée ensuite (pas avant).
+    expect(host.calibration.session('SYS_FAN3')).toBeNull();
+    expect(env.repos.calibration.get('SYS_FAN3').state).toBe('NOT_CALIBRATED');
+    expect(env.repos.calibration.get('SYS_FAN3').outputKey).toBeNull();
+  }, 30_000);
+
+  it('un échec de restoreInitial refuse la réinitialisation, sans faux message de succès, et conserve la session', async () => {
+    const env = makeEnv();
+    const host = makeHost(env, (c) => { c.calibration.identifyStepSeconds = 1; });
+    host.start();
+    const key = env.hwmon.outputKeyByLabel('SYS_FAN3')!;
+
+    host.calibration.start('SYS_FAN3', key);
+    env.repos.calibration.save({ ...env.repos.calibration.get('SYS_FAN3'), assignedHardware: 'v100-1' });
+    host.calibration.identify('SYS_FAN3');
+    await waitFor(() => env.hwmon.readEnableMode(key) === SIM_MODE_MANUAL, 5000, 'passage en mode manuel');
+    await waitFor(() => host.calibration.session('SYS_FAN3')?.busy === false, 10_000, 'fin de l’étape');
+
+    // Le pilote se met à refuser les écritures (ex. panne, permissions perdues).
+    env.hwmon.setWriteRefused('SYS_FAN3', true);
+
+    const result = await host.calibration.reset('SYS_FAN3');
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/non confirmée/);
+    // Rien n'a été supprimé : la session et l'enregistrement restent pour un
+    // nouvel essai — c'est le point exact que devait garantir ce correctif.
+    expect(host.calibration.session('SYS_FAN3')).not.toBeNull();
+    expect(env.repos.calibration.get('SYS_FAN3').state).not.toBe('NOT_CALIBRATED');
+    // La sortie reste en mode manuel : rien ne prétend un retour BIOS qui n'a pas eu lieu.
+    expect(env.hwmon.readEnableMode(key)).toBe(SIM_MODE_MANUAL);
+  }, 30_000);
+
+  it('refuse (sans y toucher) si une étape est réellement en cours (busy)', async () => {
+    const env = makeEnv();
+    const host = makeHost(env, (c) => {
+      c.calibration.minimumStepSeconds = 5;
+      c.calibration.minimumDecrement = 20;
+    });
+    host.start();
+    const key = env.hwmon.outputKeyByLabel('SYS_FAN3')!;
+    host.calibration.start('SYS_FAN3', key);
+    env.repos.calibration.save({ ...env.repos.calibration.get('SYS_FAN3'), assignedHardware: 'v100-1' });
+    host.calibration.detectMinimum('SYS_FAN3');
+    await waitFor(() => host.calibration.session('SYS_FAN3')?.busy === true, 3000, 'étape démarrée');
+
+    const result = await host.calibration.reset('SYS_FAN3');
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/en cours/);
+    expect(host.calibration.session('SYS_FAN3')).not.toBeNull();
+  }, 20_000);
+});
+
+// =====================================================================
+// reconcileOrphanedManualMode : repli sur config.fans.mapping
+// =====================================================================
+
+describe('reconciliation avec repli sur config.fans.mapping (outputKey null)', () => {
+  it('retrouve la sortie via le mappage déclaré et restitue le BIOS quand outputKey est null', () => {
+    const env = makeEnv();
+    const key = env.hwmon.outputKeyByLabel('SYS_FAN3')!; // pwm4 dans le simulateur
+    env.hwmon.writeEnableMode(key, SIM_MODE_MANUAL);
+    // État exact constaté en production après le bug de reset() : plus aucune
+    // trace d'outputKey ni de biosEnableMode.
+    env.repos.calibration.save({ ...emptyCalibration('SYS_FAN3'), state: 'NOT_CALIBRATED' });
+
+    const host = makeHost(env, (c) => {
+      c.fans.mapping.SYS_FAN3 = { controllerName: 'nct6798', pwm: 4 };
+    });
+    host.start();
+
+    expect(env.hwmon.readEnableMode(key)).toBe(SIM_MODE_BIOS);
+    expect(host.state().outputs.find((o) => o.id === 'SYS_FAN3')!.controlState).toBe('BIOS_CONTROLLED');
+  });
+
+  it('ne réconcilie jamais une sortie appartenant à une session active, même avec le repli déclaré', async () => {
+    const env = makeEnv();
+    const host = makeHost(env, (c) => {
+      c.fans.mapping.SYS_FAN3 = { controllerName: 'nct6798', pwm: 4 };
+      c.calibration.identifyStepSeconds = 2;
+      c.fanControl.loopIntervalMs = 100;
+    });
+    host.start();
+    const key = env.hwmon.outputKeyByLabel('SYS_FAN3')!;
+
+    host.calibration.start('SYS_FAN3', key);
+    env.repos.calibration.save({ ...env.repos.calibration.get('SYS_FAN3'), assignedHardware: 'v100-1' });
+    host.calibration.identify('SYS_FAN3');
+    await waitFor(() => env.hwmon.readEnableMode(key) === SIM_MODE_MANUAL, 5000, 'passage en mode manuel');
+
+    // Plusieurs ticks pendant que la session est active : jamais réconciliée,
+    // même si le repli déclaré pourrait techniquement retrouver la sortie.
+    await sleep(500);
+    expect(env.hwmon.readEnableMode(key)).toBe(SIM_MODE_MANUAL);
+    expect(host.calibration.session('SYS_FAN3')).not.toBeNull();
+  }, 20_000);
+
+  it('ne touche jamais une sortie réellement AUTHORIZED, même via le repli déclaré', () => {
+    const env = makeEnv();
+    const key = env.hwmon.outputKeyByLabel('SYS_FAN3')!;
+    env.hwmon.writeEnableMode(key, SIM_MODE_MANUAL);
+    env.repos.calibration.save({
+      ...emptyCalibration('SYS_FAN3'),
+      state: 'AUTHORIZED', outputKey: key, assignedHardware: 'v100-1',
+      softwareControlValidated: true, rpmValidation: 'CONFIRMED', minimumPwm: 35,
+      biosReturn: 'CONFIRMED', biosEnableMode: SIM_MODE_BIOS, manualEnableMode: SIM_MODE_MANUAL,
+    });
+
+    const host = makeHost(env, (c) => {
+      c.fans.mapping.SYS_FAN3 = { controllerName: 'nct6798', pwm: 4 };
+    });
+    host.start();
+
+    expect(env.hwmon.readEnableMode(key)).toBe(SIM_MODE_MANUAL);
+    expect(host.state().outputs.find((o) => o.id === 'SYS_FAN3')!.controlState).toBe('SOFTWARE_CONTROLLED');
   });
 });
